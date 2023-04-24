@@ -48,7 +48,7 @@ pub const Value = union(enum) {
                 if (!am_in_cdr) try writer.writeAll(")");
             },
             .int => |i| try writer.print("{}", .{i}),
-            .bool => |b| try writer.print("{s}", .{if (b) "#t" else "#f"}),
+            .bool => |b| try writer.writeAll(if (b) "#t" else "#f"),
             .symbol => |index| if (maybe_symbols) |symbols| {
                 try writer.print("{s}", .{symbols.getByIndex(index)});
             } else try writer.print("<{}>", .{index}),

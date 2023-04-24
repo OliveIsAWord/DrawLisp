@@ -50,8 +50,8 @@ pub fn parse(
         sexpr_stack.deinit();
     }
     while (true) {
-        defer std.debug.print("\n", .{});
-        std.debug.print("stack: {any}\n", .{sexpr_stack.items});
+        //defer std.debug.print("\n", .{});
+        //std.debug.print("stack: {any}\n", .{sexpr_stack.items});
         const token_start = tokens.byte_index;
         const token = tokens.next();
         const span = .{
@@ -122,7 +122,7 @@ pub fn parse(
                 .span = span,
             } },
         };
-        std.debug.print("value: {any}\n", .{value});
+        //std.debug.print("value: {any}\n", .{value});
         if (sexpr_stack.items.len == 0) {
             is_error = false;
             return .{ .value = value };
@@ -133,9 +133,9 @@ pub fn parse(
         last_item.dotty = false;
         var last_elem = last_list;
         while (last_elem.* == .cons) last_elem = &last_elem.cons.cdr;
-        std.debug.print("last_list: {any}\n", .{last_list});
-        std.debug.print("last_elem: {any}\n", .{last_elem});
-        std.debug.print("dotty: {}\n", .{dotty});
+        // std.debug.print("last_list: {any}\n", .{last_list});
+        // std.debug.print("last_elem: {any}\n", .{last_elem});
+        // std.debug.print("dotty: {}\n", .{dotty});
         if (dotty) {
             switch (last_elem.*) {
                 .nil => last_elem.* = value,

@@ -1,4 +1,5 @@
 const std = @import("std");
+const math = std.math;
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const AllocError = Allocator.Error;
@@ -25,6 +26,7 @@ pub fn getByIndex(self: *const Self, index: i32) []const u8 {
 
 pub fn getOrPut(self: *Self, symbol: []const u8) AllocError!i32 {
     return self.table.get(symbol) orelse {
+        if (self.table.count() >= math.maxInt(i32)) return AllocError.OutOfMemory;
         const owned_symbol: []u8 = try self.symbol_alloc.alloc(u8, symbol.len);
         mem.copy(u8, owned_symbol, symbol);
         try self.table.put(owned_symbol, @intCast(i32, self.table.count()));

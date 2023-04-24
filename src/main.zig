@@ -22,25 +22,33 @@ pub fn main() !void {
     var symbol_table = SymbolTable.init(alloc, alloc);
     defer symbol_table.deinit();
     var buffer = std.ArrayList(u8).init(alloc);
+    defer buffer.deinit();
     while (true) {
-        try stdout.writeByte("> ");
+        try stdout.writeAll("> ");
         try bw.flush();
-        try stdin.readUntilDelimiterArrayList(&buffer, '\n', std.math.maxInt(usize));
+        stdin.readUntilDelimiterArrayList(&buffer, '\n', std.math.maxInt(usize)) catch |e| switch (e) {
+            // TODO: Is this how you do Ctrl-C handling? Works on my machine.
+            error.EndOfStream => {
+                stdout.writeAll("Bye.\n") catch {};
+                bw.flush() catch {};
+                return;
+            },
+            else => return e,
+        };
         var token_iter = lexer.TokenIterator.init(buffer.items);
         const ast = switch (try parse(&token_iter, alloc, alloc, &symbol_table)) {
             .value => |v| v,
             .parse_error => |e| {
-                std.debug.print("Parsing error: {}", .{e});
-                return;
+                std.debug.print("Parsing error: {}\n", .{e});
+                continue;
             },
         };
         defer ast.deinit(alloc);
-        if (!iter.assertEof()) {
+        if (!token_iter.assertEof()) {
             std.debug.print("Parse warning: expected eof\n", .{});
         }
         try ast.print(stdout, symbol_table);
         try stdout.writeByte('\n');
         try bw.flush();
     }
-    //_ = ast;
 }

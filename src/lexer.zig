@@ -182,7 +182,7 @@ pub const TokenIterator = struct {
     }
     pub fn next(self: *Self) LexOutput {
         const out = lex(self.src);
-        print("\"{s}\" => {any}\n", .{ out.span, out.value });
+        //print("\"{s}\" => {any}\n", .{ out.span, out.value });
         self.byte_index += ptr_dist(self.src.ptr, out.rest.ptr);
         self.src = out.rest;
         return out;
