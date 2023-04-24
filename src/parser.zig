@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
+const Arc = @import("arc.zig").ArcUnmanaged;
 const lexer = @import("lexer.zig");
 const TokenIterator = lexer.TokenIterator;
 const LexError = lexer.LexError;
@@ -132,7 +133,7 @@ pub fn parse(
         const dotty = last_item.dotty;
         last_item.dotty = false;
         var last_elem = last_list;
-        while (last_elem.* == .cons) last_elem = &last_elem.cons.cdr;
+        while (last_elem.* == .cons) last_elem = &last_elem.cons.get().cdr;
         // std.debug.print("last_list: {any}\n", .{last_list});
         // std.debug.print("last_elem: {any}\n", .{last_elem});
         // std.debug.print("dotty: {}\n", .{dotty});
@@ -140,21 +141,21 @@ pub fn parse(
             switch (last_elem.*) {
                 .nil => last_elem.* = value,
                 else => {
-                    var cons = try value_alloc.create(Value.Cons);
-                    cons.* = .{ .car = last_list.*, .cdr = value };
+                    const cons_inner = .{ .car = last_list.*, .cdr = value };
+                    const cons = try Arc(Value.Cons).init(cons_inner, value_alloc);
                     last_list.* = .{ .cons = cons };
                 },
             }
         } else {
-            var cons = try value_alloc.create(Value.Cons);
-            cons.* = .{ .car = value, .cdr = .nil };
+            const cons_inner = .{ .car = value, .cdr = .nil };
+            const cons = try Arc(Value.Cons).init(cons_inner, value_alloc);
             switch (last_elem.*) {
                 .nil => {
                     last_elem.* = .{ .cons = cons };
                 },
                 else => {
-                    var big_cons = try value_alloc.create(Value.Cons);
-                    big_cons.* = .{ .car = last_list.*, .cdr = .{ .cons = cons } };
+                    const big_cons_inner = .{ .car = last_list.*, .cdr = .{ .cons = cons } };
+                    const big_cons = try Arc(Value.Cons).init(big_cons_inner, value_alloc);
                     last_list.* = .{ .cons = big_cons };
                 },
             }

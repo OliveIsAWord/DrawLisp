@@ -2,24 +2,28 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const SymbolTable = @import("SymbolTable.zig");
+const Arc = @import("arc.zig").ArcUnmanaged;
 
 const pretty_print_lists = true;
 const pretty_print_symbols = true;
 
 pub const Value = union(enum) {
     const Self = @This();
+    pub const Cons = struct { car: Value, cdr: Value };
     nil,
-    cons: *Cons,
+    cons: Arc(Cons),
     int: i64,
     bool: bool,
     symbol: i32,
 
-    pub fn deinit(self: Self, alloc: Allocator) void {
+    pub fn deinit(self_: Self, alloc: Allocator) void {
+        var self = self_;
         switch (self) {
-            .cons => |pair| {
-                pair.car.deinit(alloc);
-                pair.cdr.deinit(alloc);
-                alloc.destroy(pair);
+            .cons => |pair_| {
+                var pair = pair_;
+                pair.get().car.deinit(alloc);
+                pair.get().cdr.deinit(alloc);
+                pair.drop(alloc);
             },
             else => {},
         }
@@ -35,15 +39,15 @@ pub const Value = union(enum) {
             .nil => if (!am_in_cdr) try writer.writeAll("()"),
             .cons => |pair| {
                 if (!am_in_cdr) try writer.writeAll("(");
-                try pair.car.format_internal(writer, false, maybe_symbols);
-                const separator_or_null: ?[]const u8 = if (pretty_print_lists) switch (pair.cdr) {
+                try pair.get().car.format_internal(writer, false, maybe_symbols);
+                const separator_or_null: ?[]const u8 = if (pretty_print_lists) switch (pair.get().cdr) {
                     .nil => null,
                     .cons => " ",
                     else => " . ",
                 } else " . ";
                 if (separator_or_null) |separator| {
                     try writer.writeAll(separator);
-                    try pair.cdr.format_internal(writer, pretty_print_lists, maybe_symbols);
+                    try pair.get().cdr.format_internal(writer, pretty_print_lists, maybe_symbols);
                 }
                 if (!am_in_cdr) try writer.writeAll(")");
             },
@@ -63,6 +67,4 @@ pub const Value = union(enum) {
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         return self.format_internal(writer, false, null);
     }
-
-    pub const Cons = struct { car: Value, cdr: Value };
 };
