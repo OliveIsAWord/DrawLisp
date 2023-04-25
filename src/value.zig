@@ -2,27 +2,56 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const SymbolTable = @import("SymbolTable.zig");
+const Evaluator = @import("Evaluator.zig");
 const Arc = @import("arc.zig").ArcUnmanaged;
 
 const pretty_print_lists = true;
 const pretty_print_symbols = true;
 
-pub const Value = union(enum) {
+pub const Type = enum {
+    nil,
+    cons,
+    int,
+    bool,
+    symbol,
+    primitive_function,
+};
+
+pub const Value = union(Type) {
     const Self = @This();
-    pub const Cons = struct { car: Value, cdr: Value };
+    pub const Cons = struct {
+        car: Value,
+        cdr: Value,
+        pub fn deinit(self: @This(), alloc: Allocator) void {
+            self.car.deinit(alloc);
+            self.cdr.deinit(alloc);
+        }
+    };
     nil,
     cons: Arc(Cons),
     int: i64,
     bool: bool,
     symbol: i32,
+    primitive_function: Evaluator.PrimitiveImpl,
+
+    pub fn toListPartial(self: Self) union(enum) { list: ?Cons, bad: Value } {
+        const list = switch (self) {
+            .cons => |c| c.get().*,
+            .nil => null,
+            else => return .{ .bad = self },
+        };
+        return .{ .list = list };
+    }
+
+    pub fn getType(self: Self) Type {
+        return @intToEnum(Type, @enumToInt(self));
+    }
 
     pub fn deinit(self_: Self, alloc: Allocator) void {
         var self = self_;
         switch (self) {
-            .cons => |pair_| {
-                var pair = pair_;
-                pair.get().car.deinit(alloc);
-                pair.get().cdr.deinit(alloc);
+            .cons => |*pair| {
+                pair.get().deinit(alloc);
                 pair.drop(alloc);
             },
             else => {},
@@ -56,6 +85,13 @@ pub const Value = union(enum) {
             .symbol => |index| if (maybe_symbols) |symbols| {
                 try writer.print("{s}", .{symbols.getByIndex(index)});
             } else try writer.print("<{}>", .{index}),
+            .primitive_function => |func| {
+                const this_addr = @ptrToInt(func);
+                const name = for (Evaluator.primitive_functions) |entry| {
+                    if (this_addr == @ptrToInt(entry.impl)) break entry.name;
+                } else unreachable;
+                try writer.print("<fn {s}>", .{name});
+            },
         }
     }
 

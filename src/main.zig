@@ -3,10 +3,12 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const print = std.debug.print;
 
+const Arc = @import("arc.zig").ArcUnmanaged;
 const SymbolTable = @import("SymbolTable.zig");
 const Value = @import("value.zig").Value;
 const lexer = @import("lexer.zig");
 const parse = @import("parser.zig").parse;
+const Evaluator = @import("Evaluator.zig");
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
@@ -15,22 +17,29 @@ pub fn main() !void {
 
     const stdin = std.io.getStdIn().reader();
     const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    defer bw.flush() catch {};
-    const stdout = bw.writer();
+    var stdout_bw = std.io.bufferedWriter(stdout_file);
+    defer stdout_bw.flush() catch {};
+    const stdout = stdout_bw.writer();
+    const stderr_file = std.io.getStdErr().writer();
+    var stderr_bw = std.io.bufferedWriter(stderr_file);
+    defer stderr_bw.flush() catch {};
+    const stderr = stderr_bw.writer();
 
     var symbol_table = SymbolTable.init(alloc, alloc);
     defer symbol_table.deinit();
+    var evaluator: Evaluator = try Evaluator.init(alloc, alloc, &symbol_table);
+    defer evaluator.deinit();
     var buffer = std.ArrayList(u8).init(alloc);
     defer buffer.deinit();
     while (true) {
         try stdout.writeAll("> ");
-        try bw.flush();
+        try stdout_bw.flush();
         stdin.readUntilDelimiterArrayList(&buffer, '\n', std.math.maxInt(usize)) catch |e| switch (e) {
-            // TODO: Is this how you do Ctrl-C handling? Works on my machine.
+            // TODO: Is this how you do Ctrl-C handling? Works on my machine :3
             error.EndOfStream => {
                 stdout.writeAll("Bye.\n") catch {};
-                bw.flush() catch {};
+                stdout_bw.flush() catch {};
+                stderr_bw.flush() catch {};
                 return;
             },
             else => return e,
@@ -47,8 +56,22 @@ pub fn main() !void {
         if (!token_iter.assertEof()) {
             std.debug.print("Parse warning: expected eof\n", .{});
         }
-        try ast.print(stdout, symbol_table);
+        // try ast.print(stdout, symbol_table);
+        // try stdout.writeByte('\n');
+        // try stdout_bw.flush();
+        const eval_output = try evaluator.eval(ast);
+        const yielded_value = switch (eval_output) {
+            .value => |v| v,
+            .eval_error => |e| {
+                try stderr.writeAll("Evaluation error: ");
+                try e.print(stderr, symbol_table);
+                try stderr.writeByte('\n');
+                try stderr_bw.flush();
+                continue;
+            },
+        };
+        try yielded_value.print(stdout, symbol_table);
         try stdout.writeByte('\n');
-        try bw.flush();
+        try stdout_bw.flush();
     }
 }
