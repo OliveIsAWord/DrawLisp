@@ -20,6 +20,7 @@ pub const ParseError = struct {
         dot_outside_parens,
         repeated_dot,
         expected_value_after_dot,
+        quote_without_atom,
         todo: []const u8,
     },
     span: Span,
@@ -40,8 +41,10 @@ pub fn parse(
     value_alloc: Allocator,
     symbols: *SymbolTable,
 ) !ParseOutput {
-    const Item = struct { value: Value, dotty: bool };
+    const Item = struct { value: Value, dotty: bool, quoty: usize };
+    const quote_symbol = try symbols.getOrPut("quote");
     var sexpr_stack = std.ArrayList(Item).init(parser_alloc);
+    var quoty: usize = 0;
     var is_error = true;
     // the world if `defer` could capture a function's return value: 👩‍❤️‍💋‍👩
     defer {
@@ -66,9 +69,10 @@ pub fn parse(
                 .span = span,
             } },
         };
-        const value: Value = switch (token_value) {
+        const unquoted_value: Value = switch (token_value) {
             .paren_open => {
-                try sexpr_stack.append(.{ .value = .nil, .dotty = false });
+                try sexpr_stack.append(.{ .value = .nil, .dotty = false, .quoty = quoty });
+                quoty = 0;
                 continue;
             },
             .paren_close => blk: {
@@ -76,14 +80,27 @@ pub fn parse(
                     .kind = .unexpected_paren_close,
                     .span = span,
                 } };
+                var is_error_inner = true;
+                defer if (is_error_inner) item.value.deinit(value_alloc);
+                if (quoty > 0) {
+                    return .{ .parse_error = .{ .kind = .quote_without_atom, .span = span } };
+                }
+                quoty = item.quoty;
                 if (item.dotty) return .{ .parse_error = .{
                     .kind = .expected_value_after_dot,
                     .span = span,
                 } };
+                is_error_inner = false;
                 break :blk item.value;
             },
-            .quote => return todo("quote", span),
+            .quote => {
+                quoty += 1;
+                continue;
+            },
             .dot => {
+                if (quoty > 0) {
+                    return .{ .parse_error = .{ .kind = .quote_without_atom, .span = span } };
+                }
                 if (sexpr_stack.items.len == 0) {
                     return .{ .parse_error = .{ .kind = .dot_outside_parens, .span = span } };
                 }
@@ -123,6 +140,17 @@ pub fn parse(
                 .span = span,
             } },
         };
+        var value = unquoted_value;
+        while (quoty > 0) : (quoty -= 1) {
+            const arg_inner: Value.Cons = .{ .car = value, .cdr = .nil };
+            const arg = try Arc(Value.Cons).init(arg_inner, value_alloc);
+            const cons_inner: Value.Cons = .{
+                .car = .{ .symbol = quote_symbol },
+                .cdr = .{ .cons = arg },
+            };
+            const cons = try Arc(Value.Cons).init(cons_inner, value_alloc);
+            value = .{ .cons = cons };
+        }
         //std.debug.print("value: {any}\n", .{value});
         if (sexpr_stack.items.len == 0) {
             is_error = false;

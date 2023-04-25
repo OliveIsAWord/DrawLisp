@@ -26,9 +26,9 @@ pub fn ArcUnmanaged(comptime T: type) type {
             return self.inner.ref_count;
         }
 
-        pub fn clone(self: Self) AllocError!Self {
-            self.inner.ref_count = std.math.add(usize, self.inner.ref_count, 1) catch return AllocError.OutOfMemory;
-            return self;
+        pub fn clone(self: Self) AllocError!void {
+            self.inner.ref_count = std.math.add(usize, self.inner.ref_count, 1) catch
+                return AllocError.OutOfMemory;
         }
 
         pub fn drop(self: *Self, alloc: Allocator) void {

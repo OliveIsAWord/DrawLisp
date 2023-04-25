@@ -34,7 +34,7 @@ fn is_one_of(comptime chars: anytype) fn (anytype) bool {
 const is_whitespace = is_one_of(.{ ' ', '\n', '\t', '\r', '\x0b', '\x0c' });
 
 fn is_delimiter(c: u8) bool {
-    return is_whitespace(c) or is_one_of(.{ '\x00', '(', ')', '"', ';' })(c);
+    return is_whitespace(c) or is_one_of(.{ '\x00', '(', ')', '"', ';', '.' })(c);
 }
 
 fn is_digit(c: u8) bool {

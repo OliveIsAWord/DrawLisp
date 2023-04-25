@@ -44,6 +44,7 @@ pub fn main() !void {
             },
             else => return e,
         };
+        if (buffer.items[0] == ';') return;
         var token_iter = lexer.TokenIterator.init(buffer.items);
         const ast = switch (try parse(&token_iter, alloc, alloc, &symbol_table)) {
             .value => |v| v,
@@ -56,9 +57,10 @@ pub fn main() !void {
         if (!token_iter.assertEof()) {
             std.debug.print("Parse warning: expected eof\n", .{});
         }
-        // try ast.print(stdout, symbol_table);
-        // try stdout.writeByte('\n');
-        // try stdout_bw.flush();
+        try stdout.writeAll("ast: ");
+        try ast.print(stdout, symbol_table);
+        try stdout.writeByte('\n');
+        try stdout_bw.flush();
         const eval_output = try evaluator.eval(ast);
         const yielded_value = switch (eval_output) {
             .value => |v| v,
@@ -70,6 +72,7 @@ pub fn main() !void {
                 continue;
             },
         };
+        defer yielded_value.deinit(alloc);
         try yielded_value.print(stdout, symbol_table);
         try stdout.writeByte('\n');
         try stdout_bw.flush();

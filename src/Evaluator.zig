@@ -3,6 +3,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AllocError = Allocator.Error;
 
+const Arc = @import("arc.zig").ArcUnmanaged;
 const SymbolTable = @import("SymbolTable.zig");
 const Type = @import("value.zig").Type;
 const Value = @import("value.zig").Value;
@@ -51,8 +52,117 @@ fn MaskFromEnum(comptime T: type) type {
 }
 const TypeMask = MaskFromEnum(Type);
 
+fn GetArgsOutput(comptime num_args: comptime_int) type {
+    return union(enum) {
+        args: [num_args]Value,
+        eval_error: EvalError,
+    };
+}
+fn getArgsNoEval(comptime num_args: comptime_int, list_: ?Value.Cons) GetArgsOutput(num_args) {
+    var list = list_;
+    var args: [num_args]Value = undefined;
+    for (args) |*arg| {
+        const cons = list orelse return .{ .eval_error = .not_enough_args };
+        arg.* = cons.car;
+        list = switch (cons.cdr.toListPartial()) {
+            .list => |c| c,
+            .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
+        };
+    }
+    if (list) |extra_args| return .{ .eval_error = .{ .extra_args = extra_args.cdr } };
+    return .{ .args = args };
+}
+
+fn getArgs(
+    comptime num_args: comptime_int,
+    self: *Self,
+    list: ?Value.Cons,
+) !GetArgsOutput(num_args) {
+    var args = switch (getArgsNoEval(num_args, list)) {
+        .args => |a| a,
+        .eval_error => |e| return .{ .eval_error = e },
+    };
+    for (args) |*arg| {
+        switch (try self.eval(arg.*)) {
+            .value => |v| arg.* = v,
+            .eval_error => |e| return .{ .eval_error = e },
+        }
+    }
+    return .{ .args = args };
+}
+
 const primitive_impls = struct {
-    fn add(list_: ?Value.Cons, _: Allocator) !EvalOutput {
+    fn quote(_: *Self, list_: ?Value.Cons) !EvalOutput {
+        const cons = list_ orelse return .{ .value = .nil };
+        switch (cons.cdr.toListPartial()) {
+            .list => |v| if (v) |_| return .{ .eval_error = .{ .extra_args = cons.cdr } },
+            .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
+        }
+        return .{ .value = cons.car };
+    }
+    fn atom(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const cons = list orelse return .{ .value = .nil };
+        switch (cons.cdr.toListPartial()) {
+            .list => |v| if (v) |_| return .{ .eval_error = .{ .extra_args = cons.cdr } },
+            .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
+        }
+        const arg = switch (try self.eval(cons.car)) {
+            .value => |v| v,
+            else => |e| return e,
+        };
+        const is_atom = switch (arg) {
+            .cons => false,
+            else => true,
+        };
+        return .{ .value = .{ .bool = is_atom } };
+    }
+    fn eq(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const x = args[0];
+        const y = args[1];
+        return .{ .value = .{ .bool = x.eq(y) } };
+    }
+    fn car(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(1, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const x = switch (args[0]) {
+            .cons => |c| c,
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.cons}),
+                .found = v,
+            } } },
+        };
+        return .{ .value = x.get().car };
+    }
+    fn cdr(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(1, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const x = switch (args[0]) {
+            .cons => |c| c,
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.cons}),
+                .found = v,
+            } } },
+        };
+        return .{ .value = x.get().cdr };
+    }
+    fn create_cons(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const cons_inner = .{ .car = args[0], .cdr = args[1] };
+        const cons = try Arc(Value.Cons).init(cons_inner, self.value_alloc);
+        return .{ .value = .{ .cons = cons } };
+    }
+    fn add(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var sum: i64 = 0;
         var list = list_;
         while (list) |cons| {
@@ -60,7 +170,11 @@ const primitive_impls = struct {
                 .list => |meow| meow,
                 .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
             };
-            sum += switch (cons.car) {
+            const arg = switch (try self.eval(cons.car)) {
+                .value => |v| v,
+                else => |e| return e,
+            };
+            sum += switch (arg) {
                 .int => |i| i,
                 else => |v| return .{ .eval_error = .{ .expected_type = .{
                     .expected = TypeMask.new(&.{.int}),
@@ -72,12 +186,18 @@ const primitive_impls = struct {
     }
 };
 
-pub const PrimitiveImpl = *const fn (?Value.Cons, Allocator) anyerror!EvalOutput;
+pub const PrimitiveImpl = *const fn (*Self, ?Value.Cons) AllocError!EvalOutput;
 const PrimitiveEntry = struct {
     name: []const u8,
     impl: PrimitiveImpl,
 };
 pub const primitive_functions = [_]PrimitiveEntry{
+    .{ .name = "quote", .impl = primitive_impls.quote },
+    .{ .name = "atom?", .impl = primitive_impls.atom },
+    .{ .name = "eq?", .impl = primitive_impls.eq },
+    .{ .name = "car", .impl = primitive_impls.car },
+    .{ .name = "cdr", .impl = primitive_impls.cdr },
+    .{ .name = "cons", .impl = primitive_impls.create_cons },
     .{ .name = "+", .impl = primitive_impls.add },
 };
 
@@ -86,6 +206,8 @@ pub const EvalError = union(enum) {
     cannot_call: Value,
     malformed_list: Value,
     expected_type: struct { expected: TypeMask, found: Value },
+    extra_args: Value,
+    not_enough_args,
 
     pub fn print(self: @This(), writer: anytype, symbols: SymbolTable) !void {
         return switch (self) {
@@ -113,6 +235,12 @@ pub const EvalError = union(enum) {
                 try meow.found.print(writer, symbols);
                 try writer.writeByte('`');
             },
+            .extra_args => |v| {
+                try writer.writeAll("extra args `");
+                try v.print(writer, symbols);
+                try writer.writeByte('`');
+            },
+            .not_enough_args => try writer.writeAll("not enough args"),
         };
     }
 };
@@ -145,13 +273,13 @@ pub fn init(
 }
 
 pub fn eval(self: *Self, value: Value) !EvalOutput {
-    _ = .{ self, value };
     const yielded_value: Value = switch (value) {
         .nil, .bool, .int => value,
         .symbol => |s| if (self.map.get(s)) |v| v else {
             return .{ .eval_error = .{ .evaluated_symbol = s } };
         },
         .cons => |pair| {
+            try pair.clone();
             const function_out = try self.eval(pair.get().car);
             if (function_out.is_error()) return function_out;
             const function = function_out.value;
@@ -161,7 +289,7 @@ pub fn eval(self: *Self, value: Value) !EvalOutput {
             };
             const args = pair.get().cdr.toListPartial();
             switch (args) {
-                .list => |list| return f(list, self.value_alloc),
+                .list => |list| return f(self, list),
                 .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
             }
         },
