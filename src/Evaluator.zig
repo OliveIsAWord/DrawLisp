@@ -3,13 +3,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AllocError = Allocator.Error;
 
-const Arc = @import("arc.zig").ArcUnmanaged;
 const SymbolTable = @import("SymbolTable.zig");
 const Type = @import("value.zig").Type;
 const Value = @import("value.zig").Value;
+const Gc = @import("Gc.zig");
 
 map: Map,
-value_alloc: Allocator,
+gc: *Gc,
 
 const Map = std.AutoHashMap(i32, Value);
 
@@ -137,7 +137,7 @@ const primitive_impls = struct {
                 .found = v,
             } } },
         };
-        return .{ .value = x.get().car };
+        return .{ .value = x.car };
     }
     fn cdr(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(1, self, list)) {
@@ -151,7 +151,7 @@ const primitive_impls = struct {
                 .found = v,
             } } },
         };
-        return .{ .value = x.get().cdr };
+        return .{ .value = x.cdr };
     }
     fn create_cons(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
@@ -159,7 +159,7 @@ const primitive_impls = struct {
             .eval_error => |e| return .{ .eval_error = e },
         };
         const cons_inner = .{ .car = args[0], .cdr = args[1] };
-        const cons = try Arc(Value.Cons).init(cons_inner, self.value_alloc);
+        const cons = try self.gc.create(cons_inner);
         return .{ .value = .{ .cons = cons } };
     }
     fn add(self: *Self, list_: ?Value.Cons) !EvalOutput {
@@ -259,7 +259,7 @@ pub const EvalOutput = union(enum) {
 
 pub fn init(
     evaluator_alloc: Allocator,
-    value_alloc: Allocator,
+    gc: *Gc,
     symbol_table: *SymbolTable,
 ) AllocError!Self {
     var map = Map.init(evaluator_alloc);
@@ -269,40 +269,34 @@ pub fn init(
         const symbol = try symbol_table.put(identifier);
         try map.put(symbol, value);
     }
-    return .{ .map = map, .value_alloc = value_alloc };
+    return .{ .map = map, .gc = gc };
 }
 
 pub fn eval(self: *Self, value: Value) !EvalOutput {
     const yielded_value: Value = switch (value) {
-        .nil, .bool, .int => value,
+        .nil, .bool, .int, .primitive_function => value,
         .symbol => |s| if (self.map.get(s)) |v| v else {
             return .{ .eval_error = .{ .evaluated_symbol = s } };
         },
         .cons => |pair| {
-            try pair.clone();
-            const function_out = try self.eval(pair.get().car);
+            const function_out = try self.eval(pair.car);
             if (function_out.is_error()) return function_out;
             const function = function_out.value;
             const f = switch (function) {
                 .primitive_function => |f| f,
                 else => return .{ .eval_error = .{ .cannot_call = function } },
             };
-            const args = pair.get().cdr.toListPartial();
+            const args = pair.cdr.toListPartial();
             switch (args) {
                 .list => |list| return f(self, list),
                 .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
             }
         },
-        .primitive_function => unreachable,
     };
     return .{ .value = yielded_value };
 }
 
 pub fn deinit(self: *Self) void {
-    var iter = self.map.iterator();
-    while (iter.next()) |entry| {
-        entry.value_ptr.deinit(self.value_alloc);
-    }
     self.map.deinit();
     self.* = undefined;
 }

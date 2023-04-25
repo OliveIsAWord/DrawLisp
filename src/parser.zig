@@ -2,12 +2,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const Arc = @import("arc.zig").ArcUnmanaged;
 const lexer = @import("lexer.zig");
 const TokenIterator = lexer.TokenIterator;
 const LexError = lexer.LexError;
 const Value = @import("value.zig").Value;
 const SymbolTable = @import("SymbolTable.zig");
+const Gc = @import("Gc.zig");
 
 pub const Span = struct { start: u32, len: u32 };
 
@@ -38,7 +38,7 @@ fn todo(message: []const u8, span: Span) ParseOutput {
 pub fn parse(
     tokens: *TokenIterator,
     parser_alloc: Allocator,
-    value_alloc: Allocator,
+    value_alloc: *Gc,
     symbols: *SymbolTable,
 ) !ParseOutput {
     const Item = struct { value: Value, dotty: bool, quoty: usize };
@@ -46,13 +46,8 @@ pub fn parse(
     var sexpr_stack = std.ArrayList(Item).init(parser_alloc);
     var quoty: usize = 0;
     var is_error = true;
-    // the world if `defer` could capture a function's return value: 👩‍❤️‍💋‍👩
-    defer {
-        if (is_error) {
-            for (sexpr_stack.items) |item| item.value.deinit(value_alloc);
-        }
-        sexpr_stack.deinit();
-    }
+    defer sexpr_stack.deinit();
+
     while (true) {
         //defer std.debug.print("\n", .{});
         //std.debug.print("stack: {any}\n", .{sexpr_stack.items});
@@ -80,8 +75,6 @@ pub fn parse(
                     .kind = .unexpected_paren_close,
                     .span = span,
                 } };
-                var is_error_inner = true;
-                defer if (is_error_inner) item.value.deinit(value_alloc);
                 if (quoty > 0) {
                     return .{ .parse_error = .{ .kind = .quote_without_atom, .span = span } };
                 }
@@ -90,7 +83,6 @@ pub fn parse(
                     .kind = .expected_value_after_dot,
                     .span = span,
                 } };
-                is_error_inner = false;
                 break :blk item.value;
             },
             .quote => {
@@ -143,12 +135,12 @@ pub fn parse(
         var value = unquoted_value;
         while (quoty > 0) : (quoty -= 1) {
             const arg_inner: Value.Cons = .{ .car = value, .cdr = .nil };
-            const arg = try Arc(Value.Cons).init(arg_inner, value_alloc);
+            const arg = try value_alloc.create(arg_inner);
             const cons_inner: Value.Cons = .{
                 .car = .{ .symbol = quote_symbol },
                 .cdr = .{ .cons = arg },
             };
-            const cons = try Arc(Value.Cons).init(cons_inner, value_alloc);
+            const cons = try value_alloc.create(cons_inner);
             value = .{ .cons = cons };
         }
         //std.debug.print("value: {any}\n", .{value});
@@ -161,7 +153,7 @@ pub fn parse(
         const dotty = last_item.dotty;
         last_item.dotty = false;
         var last_elem = last_list;
-        while (last_elem.* == .cons) last_elem = &last_elem.cons.get().cdr;
+        while (last_elem.* == .cons) last_elem = &last_elem.cons.cdr;
         // std.debug.print("last_list: {any}\n", .{last_list});
         // std.debug.print("last_elem: {any}\n", .{last_elem});
         // std.debug.print("dotty: {}\n", .{dotty});
@@ -170,20 +162,20 @@ pub fn parse(
                 .nil => last_elem.* = value,
                 else => {
                     const cons_inner = .{ .car = last_list.*, .cdr = value };
-                    const cons = try Arc(Value.Cons).init(cons_inner, value_alloc);
+                    const cons = try value_alloc.create(cons_inner);
                     last_list.* = .{ .cons = cons };
                 },
             }
         } else {
             const cons_inner = .{ .car = value, .cdr = .nil };
-            const cons = try Arc(Value.Cons).init(cons_inner, value_alloc);
+            const cons = try value_alloc.create(cons_inner);
             switch (last_elem.*) {
                 .nil => {
                     last_elem.* = .{ .cons = cons };
                 },
                 else => {
                     const big_cons_inner = .{ .car = last_list.*, .cdr = .{ .cons = cons } };
-                    const big_cons = try Arc(Value.Cons).init(big_cons_inner, value_alloc);
+                    const big_cons = try value_alloc.create(big_cons_inner);
                     last_list.* = .{ .cons = big_cons };
                 },
             }

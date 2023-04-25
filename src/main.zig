@@ -3,12 +3,12 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const print = std.debug.print;
 
-const Arc = @import("arc.zig").ArcUnmanaged;
 const SymbolTable = @import("SymbolTable.zig");
 const Value = @import("value.zig").Value;
 const lexer = @import("lexer.zig");
 const parse = @import("parser.zig").parse;
 const Evaluator = @import("Evaluator.zig");
+const Gc = @import("Gc.zig");
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
@@ -27,11 +27,14 @@ pub fn main() !void {
 
     var symbol_table = SymbolTable.init(alloc, alloc);
     defer symbol_table.deinit();
-    var evaluator: Evaluator = try Evaluator.init(alloc, alloc, &symbol_table);
+    var gc = Gc.init(alloc, alloc);
+    defer gc.deinit();
+    var evaluator: Evaluator = try Evaluator.init(alloc, &gc, &symbol_table);
     defer evaluator.deinit();
     var buffer = std.ArrayList(u8).init(alloc);
     defer buffer.deinit();
     while (true) {
+        defer gc.sweep();
         try stdout.writeAll("> ");
         try stdout_bw.flush();
         stdin.readUntilDelimiterArrayList(&buffer, '\n', std.math.maxInt(usize)) catch |e| switch (e) {
@@ -46,14 +49,13 @@ pub fn main() !void {
         };
         if (buffer.items[0] == ';') return;
         var token_iter = lexer.TokenIterator.init(buffer.items);
-        const ast = switch (try parse(&token_iter, alloc, alloc, &symbol_table)) {
+        const ast = switch (try parse(&token_iter, alloc, &gc, &symbol_table)) {
             .value => |v| v,
             .parse_error => |e| {
                 std.debug.print("Parsing error: {}\n", .{e});
                 continue;
             },
         };
-        defer ast.deinit(alloc);
         if (!token_iter.assertEof()) {
             std.debug.print("Parse warning: expected eof\n", .{});
         }
@@ -72,7 +74,6 @@ pub fn main() !void {
                 continue;
             },
         };
-        defer yielded_value.deinit(alloc);
         try yielded_value.print(stdout, symbol_table);
         try stdout.writeByte('\n');
         try stdout_bw.flush();

@@ -3,11 +3,9 @@ const Allocator = std.mem.Allocator;
 
 const SymbolTable = @import("SymbolTable.zig");
 const Evaluator = @import("Evaluator.zig");
-const Arc = @import("arc.zig").ArcUnmanaged;
 
 const pretty_print_lists = false;
 const pretty_print_symbols = true;
-const print_ref_count = true;
 
 pub const Type = enum {
     nil,
@@ -21,15 +19,12 @@ pub const Type = enum {
 pub const Value = union(Type) {
     const Self = @This();
     pub const Cons = struct {
+        marked: bool = false,
         car: Value,
         cdr: Value,
-        pub fn deinit(self: @This(), alloc: Allocator) void {
-            self.car.deinit(alloc);
-            self.cdr.deinit(alloc);
-        }
     };
     nil,
-    cons: Arc(Cons),
+    cons: *Cons,
     int: i64,
     bool: bool,
     symbol: i32,
@@ -37,7 +32,7 @@ pub const Value = union(Type) {
 
     pub fn toListPartial(self: Self) union(enum) { list: ?Cons, bad: Value } {
         const list = switch (self) {
-            .cons => |c| c.get().*,
+            .cons => |c| c.*,
             .nil => null,
             else => return .{ .bad = self },
         };
@@ -58,17 +53,6 @@ pub const Value = union(Type) {
         return false;
     }
 
-    pub fn deinit(self_: Self, alloc: Allocator) void {
-        var self = self_;
-        switch (self) {
-            .cons => |*pair| {
-                pair.get().deinit(alloc);
-                pair.drop(alloc);
-            },
-            else => {},
-        }
-    }
-
     fn format_internal(
         self: Self,
         writer: anytype,
@@ -78,17 +62,16 @@ pub const Value = union(Type) {
         switch (self) {
             .nil => if (!am_in_cdr) try writer.writeAll("()"),
             .cons => |pair| {
-                if (print_ref_count) try writer.print("[{}]", .{pair.refCount()});
                 if (!am_in_cdr) try writer.writeAll("(");
-                try pair.get().car.format_internal(writer, false, maybe_symbols);
-                const separator_or_null: ?[]const u8 = if (pretty_print_lists) switch (pair.get().cdr) {
+                try pair.car.format_internal(writer, false, maybe_symbols);
+                const separator_or_null: ?[]const u8 = if (pretty_print_lists) switch (pair.cdr) {
                     .nil => null,
                     .cons => " ",
                     else => " . ",
                 } else " . ";
                 if (separator_or_null) |separator| {
                     try writer.writeAll(separator);
-                    try pair.get().cdr.format_internal(writer, pretty_print_lists, maybe_symbols);
+                    try pair.cdr.format_internal(writer, pretty_print_lists, maybe_symbols);
                 }
                 if (!am_in_cdr) try writer.writeAll(")");
             },
