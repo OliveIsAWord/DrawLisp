@@ -135,12 +135,12 @@ pub fn parse(
         var value = unquoted_value;
         while (quoty > 0) : (quoty -= 1) {
             const arg_inner: Value.Cons = .{ .car = value, .cdr = .nil };
-            const arg = try value_alloc.create(arg_inner);
+            const arg = try value_alloc.create_cons(arg_inner);
             const cons_inner: Value.Cons = .{
                 .car = .{ .symbol = quote_symbol },
                 .cdr = .{ .cons = arg },
             };
-            const cons = try value_alloc.create(cons_inner);
+            const cons = try value_alloc.create_cons(cons_inner);
             value = .{ .cons = cons };
         }
         //std.debug.print("value: {any}\n", .{value});
@@ -162,20 +162,20 @@ pub fn parse(
                 .nil => last_elem.* = value,
                 else => {
                     const cons_inner = .{ .car = last_list.*, .cdr = value };
-                    const cons = try value_alloc.create(cons_inner);
+                    const cons = try value_alloc.create_cons(cons_inner);
                     last_list.* = .{ .cons = cons };
                 },
             }
         } else {
             const cons_inner = .{ .car = value, .cdr = .nil };
-            const cons = try value_alloc.create(cons_inner);
+            const cons = try value_alloc.create_cons(cons_inner);
             switch (last_elem.*) {
                 .nil => {
                     last_elem.* = .{ .cons = cons };
                 },
                 else => {
                     const big_cons_inner = .{ .car = last_list.*, .cdr = .{ .cons = cons } };
-                    const big_cons = try value_alloc.create(big_cons_inner);
+                    const big_cons = try value_alloc.create_cons(big_cons_inner);
                     last_list.* = .{ .cons = big_cons };
                 },
             }

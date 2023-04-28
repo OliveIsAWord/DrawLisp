@@ -20,8 +20,12 @@ pub fn deinit(self: *Self) void {
     self.table.deinit();
 }
 
-pub fn getByIndex(self: *const Self, index: i32) []const u8 {
+pub fn getByIndex(self: Self, index: i32) []const u8 {
     return self.table.unmanaged.entries.get(@intCast(usize, index)).key;
+}
+
+pub fn ensureUnusedCapacity(self: *Self, len: usize) AllocError!void {
+    try self.table.ensureUnusedCapacity(len);
 }
 
 pub fn put(self: *Self, symbol: []const u8) AllocError!i32 {

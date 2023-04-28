@@ -10,8 +10,10 @@ const Gc = @import("Gc.zig");
 
 map: Map,
 gc: *Gc,
+visit_stack: std.ArrayListUnmanaged(Value) = .{},
 
-const Map = std.AutoHashMap(i32, Value);
+pub const Variable = struct { symbol: i32, value: Value };
+pub const Map = std.ArrayList(Variable);
 
 fn MaskFromEnum(comptime T: type) type {
     return struct {
@@ -110,11 +112,7 @@ const primitive_impls = struct {
             .value => |v| v,
             else => |e| return e,
         };
-        const is_atom = switch (arg) {
-            .cons => false,
-            else => true,
-        };
-        return .{ .value = .{ .bool = is_atom } };
+        return .{ .value = .{ .bool = arg != .cons } };
     }
     fn eq(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
@@ -159,8 +157,72 @@ const primitive_impls = struct {
             .eval_error => |e| return .{ .eval_error = e },
         };
         const cons_inner = .{ .car = args[0], .cdr = args[1] };
-        const cons = try self.gc.create(cons_inner);
+        const cons = try self.gc.create_cons(cons_inner);
         return .{ .value = .{ .cons = cons } };
+    }
+    fn create_lambda(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const cons_args = switch (getArgsNoEval(2, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        var args = std.ArrayListUnmanaged(i32){};
+        var is_error = true;
+        defer if (is_error) args.deinit(self.gc.value_alloc);
+        switch (cons_args[0]) {
+            .nil => {},
+            .symbol => |symbol| try args.append(self.gc.value_alloc, symbol),
+            .cons => |cons| {
+                var arg_list: ?Value.Cons = cons.*;
+                while (arg_list) |pair| {
+                    switch (pair.car) {
+                        .symbol => |symbol| try args.append(self.gc.value_alloc, symbol),
+                        else => |v| return .{ .eval_error = .{ .expected_type = .{
+                            .expected = TypeMask.new(&.{.symbol}),
+                            .found = v,
+                        } } },
+                    }
+                    arg_list = switch (pair.cdr.toListPartial()) {
+                        .list => |x| x,
+                        .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+                    };
+                }
+            },
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{ .cons, .symbol }),
+                .found = v,
+            } } },
+        }
+        const body = cons_args[1];
+        try self.visit_stack.append(self.map.allocator, body);
+        var binds = std.ArrayList(Variable).init(self.gc.value_alloc);
+        defer binds.deinit();
+        // TODO: binding any variables in lambda.args is redundant
+        // e.g. (lambda x (lambda x x))
+        // should we keep track of a set of symbols not to bind?
+        while (self.visit_stack.popOrNull()) |visit| {
+            switch (visit) {
+                .nil, .int, .bool, .primitive_function => {},
+                .symbol => |symbol| if (self.getVar(symbol)) |current_value| {
+                    try binds.append(.{ .symbol = symbol, .value = current_value });
+                },
+                .cons => |pair| {
+                    try self.visit_stack.append(self.map.allocator, pair.car);
+                    try self.visit_stack.append(self.map.allocator, pair.cdr);
+                },
+                .lambda => |lambda| {
+                    try self.visit_stack.append(self.map.allocator, lambda.body);
+                },
+            }
+        }
+        var lambda_inner = Value.Lambda{
+            .args = args,
+            .binds = binds.toOwnedSlice(),
+            .body = body,
+        };
+        defer if (is_error) lambda_inner.deinit(self.gc.value_alloc);
+        const lambda = try self.gc.create_lambda(lambda_inner);
+        is_error = false;
+        return .{ .value = .{ .lambda = lambda } };
     }
     fn add(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var sum: i64 = 0;
@@ -198,21 +260,23 @@ pub const primitive_functions = [_]PrimitiveEntry{
     .{ .name = "car", .impl = primitive_impls.car },
     .{ .name = "cdr", .impl = primitive_impls.cdr },
     .{ .name = "cons", .impl = primitive_impls.create_cons },
+    .{ .name = "lambda", .impl = primitive_impls.create_lambda },
     .{ .name = "+", .impl = primitive_impls.add },
 };
 
 pub const EvalError = union(enum) {
-    evaluated_symbol: i32,
+    variable_not_found: i32,
     cannot_call: Value,
     malformed_list: Value,
     expected_type: struct { expected: TypeMask, found: Value },
     extra_args: Value,
     not_enough_args,
+    todo: []const u8,
 
     pub fn print(self: @This(), writer: anytype, symbols: SymbolTable) !void {
         return switch (self) {
-            .evaluated_symbol => |s| writer.print(
-                "could not evaluate symbol `{s}`",
+            .variable_not_found => |s| writer.print(
+                "variable `{s}` not defined",
                 .{symbols.getByIndex(s)},
             ),
             .cannot_call => |v| {
@@ -224,7 +288,7 @@ pub const EvalError = union(enum) {
                 );
             },
             .malformed_list => |v| {
-                try writer.writeAll("malformed list `");
+                try writer.writeAll("malformed list at `");
                 try v.print(writer, symbols);
                 try writer.writeByte('`');
             },
@@ -241,6 +305,7 @@ pub const EvalError = union(enum) {
                 try writer.writeByte('`');
             },
             .not_enough_args => try writer.writeAll("not enough args"),
+            .todo => |msg| try writer.print("TODO \"{s}\"", .{msg}),
         };
     }
 };
@@ -250,10 +315,7 @@ pub const EvalOutput = union(enum) {
     eval_error: EvalError,
 
     fn is_error(self: @This()) bool {
-        return switch (self) {
-            .value => false,
-            .eval_error => true,
-        };
+        return self == .eval_error;
     }
 };
 
@@ -262,41 +324,82 @@ pub fn init(
     gc: *Gc,
     symbol_table: *SymbolTable,
 ) AllocError!Self {
-    var map = Map.init(evaluator_alloc);
-    inline for (primitive_functions) |entry| {
+    const len = primitive_functions.len;
+    try symbol_table.ensureUnusedCapacity(len);
+    var map = try Map.initCapacity(evaluator_alloc, len);
+    errdefer map.deinit();
+    for (primitive_functions) |entry| {
         const identifier = entry.name;
         const value = .{ .primitive_function = entry.impl };
         const symbol = try symbol_table.put(identifier);
-        try map.put(symbol, value);
+        map.appendAssumeCapacity(.{ .symbol = symbol, .value = value });
     }
     return .{ .map = map, .gc = gc };
 }
 
+fn getVar(self: Self, symbol: i32) ?Value {
+    const items = self.map.items;
+    var i = items.len - 1;
+    while (true) {
+        const entry = items[i];
+        if (entry.symbol == symbol) return entry.value;
+        if (i == 0) return null else i -= 1;
+    }
+}
+
 pub fn eval(self: *Self, value: Value) !EvalOutput {
-    const yielded_value: Value = switch (value) {
-        .nil, .bool, .int, .primitive_function => value,
-        .symbol => |s| if (self.map.get(s)) |v| v else {
-            return .{ .eval_error = .{ .evaluated_symbol = s } };
+    switch (value) {
+        .nil, .bool, .int, .primitive_function, .lambda => return .{ .value = value },
+        .symbol => |s| if (self.getVar(s)) |v| return .{ .value = v } else {
+            return .{ .eval_error = .{ .variable_not_found = s } };
         },
         .cons => |pair| {
             const function_out = try self.eval(pair.car);
             if (function_out.is_error()) return function_out;
             const function = function_out.value;
-            const f = switch (function) {
-                .primitive_function => |f| f,
+            switch (function) {
+                .primitive_function => |f| {
+                    const args = pair.cdr.toListPartial();
+                    switch (args) {
+                        .list => |list| return f(self, list),
+                        .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
+                    }
+                },
+                .lambda => |lambda| {
+                    const old_len = self.map.items.len;
+                    defer self.map.shrinkRetainingCapacity(old_len);
+                    try self.map.ensureUnusedCapacity(lambda.binds.len + lambda.args.items.len);
+                    self.map.appendSliceAssumeCapacity(lambda.binds);
+                    var arg_list: Value = pair.cdr;
+                    for (lambda.args.items) |arg_symbol| {
+                        const args = arg_list.toListPartial();
+                        switch (args) {
+                            .list => |list| if (list) |cons| {
+                                self.map.appendAssumeCapacity(.{
+                                    .symbol = arg_symbol,
+                                    .value = cons.car,
+                                });
+                                arg_list = cons.cdr;
+                            } else return .{ .eval_error = .not_enough_args },
+                            .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
+                        }
+                    }
+                    switch (arg_list) {
+                        .nil => {},
+                        .cons => return .{ .eval_error = .{ .extra_args = arg_list } },
+                        else => return .{ .eval_error = .{ .malformed_list = arg_list } },
+                    }
+                    return self.eval(lambda.body);
+                },
                 else => return .{ .eval_error = .{ .cannot_call = function } },
-            };
-            const args = pair.cdr.toListPartial();
-            switch (args) {
-                .list => |list| return f(self, list),
-                .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
+                // (((lambda x (lambda y (+ x y))) 34) 35)
             }
         },
-    };
-    return .{ .value = yielded_value };
+    }
 }
 
 pub fn deinit(self: *Self) void {
+    self.visit_stack.deinit(self.map.allocator);
     self.map.deinit();
     self.* = undefined;
 }

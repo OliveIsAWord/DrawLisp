@@ -4,8 +4,9 @@ const Allocator = std.mem.Allocator;
 const SymbolTable = @import("SymbolTable.zig");
 const Evaluator = @import("Evaluator.zig");
 
-const pretty_print_lists = false;
+const pretty_print_lists = true;
 const pretty_print_symbols = true;
+const quote_before_symbols = false;
 
 pub const Type = enum {
     nil,
@@ -14,6 +15,7 @@ pub const Type = enum {
     bool,
     symbol,
     primitive_function,
+    lambda,
 };
 
 pub const Value = union(Type) {
@@ -23,12 +25,24 @@ pub const Value = union(Type) {
         car: Value,
         cdr: Value,
     };
+    pub const Lambda = struct {
+        marked: bool = false,
+        args: std.ArrayListUnmanaged(i32),
+        binds: []Evaluator.Variable,
+        body: Value,
+        pub fn deinit(self: *@This(), alloc: Allocator) void {
+            self.args.deinit(alloc);
+            alloc.free(self.binds);
+            self.* = undefined;
+        }
+    };
     nil,
     cons: *Cons,
     int: i64,
     bool: bool,
     symbol: i32,
     primitive_function: Evaluator.PrimitiveImpl,
+    lambda: *Lambda,
 
     pub fn toListPartial(self: Self) union(enum) { list: ?Cons, bad: Value } {
         const list = switch (self) {
@@ -40,7 +54,7 @@ pub const Value = union(Type) {
     }
 
     pub fn getType(self: Self) Type {
-        return @intToEnum(Type, @enumToInt(self));
+        return self;
     }
 
     pub fn eq(x: Self, y: Self) bool {
@@ -51,6 +65,13 @@ pub const Value = union(Type) {
         if (x == .primitive_function and y == .primitive_function)
             return x.primitive_function == y.primitive_function;
         return false;
+    }
+
+    fn print_symbol(symbol: i32, writer: anytype, maybe_symbols: ?SymbolTable) !void {
+        if (maybe_symbols) |symbols| {
+            if (quote_before_symbols) writer.writeByte('\'');
+            try writer.writeAll(symbols.getByIndex(symbol));
+        } else try writer.print("<{}>", .{symbol});
     }
 
     fn format_internal(
@@ -77,15 +98,23 @@ pub const Value = union(Type) {
             },
             .int => |i| try writer.print("{}", .{i}),
             .bool => |b| try writer.writeAll(if (b) "#t" else "#f"),
-            .symbol => |index| if (maybe_symbols) |symbols| {
-                try writer.print("'{s}", .{symbols.getByIndex(index)});
-            } else try writer.print("<{}>", .{index}),
+            .symbol => |index| try Self.print_symbol(index, writer, maybe_symbols),
             .primitive_function => |func| {
                 const this_addr = @ptrToInt(func);
                 const name = for (Evaluator.primitive_functions) |entry| {
                     if (this_addr == @ptrToInt(entry.impl)) break entry.name;
                 } else return writer.writeAll("<fn>");
                 try writer.print("<fn {s}>", .{name});
+            },
+            .lambda => |lambda| {
+                try writer.writeAll("<lambda");
+                for (lambda.args.items) |symbol| {
+                    try writer.writeByte(' ');
+                    try Self.print_symbol(symbol, writer, maybe_symbols);
+                }
+                try writer.writeAll(": ");
+                try lambda.body.format_internal(writer, false, maybe_symbols);
+                try writer.writeAll(">");
             },
         }
     }
