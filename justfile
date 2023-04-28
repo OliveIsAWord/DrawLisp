@@ -1,6 +1,9 @@
 run:
     zig build run
     
+rf:
+    zig build run -freference-trace
+    
 build:
     zig build
 

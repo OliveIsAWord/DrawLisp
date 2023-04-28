@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const SymbolTable = @import("SymbolTable.zig");
 const Evaluator = @import("Evaluator.zig");
+const RuntimeWriter = @import("RuntimeWriter.zig");
 
 const pretty_print_lists = true;
 const pretty_print_symbols = true;
@@ -67,7 +68,7 @@ pub const Value = union(Type) {
         return false;
     }
 
-    fn print_symbol(symbol: i32, writer: anytype, maybe_symbols: ?SymbolTable) !void {
+    fn print_symbol(symbol: i32, writer: RuntimeWriter, maybe_symbols: ?SymbolTable) !void {
         if (maybe_symbols) |symbols| {
             if (quote_before_symbols) writer.writeByte('\'');
             try writer.writeAll(symbols.getByIndex(symbol));
@@ -76,7 +77,7 @@ pub const Value = union(Type) {
 
     fn format_internal(
         self: Self,
-        writer: anytype,
+        writer: RuntimeWriter,
         am_in_cdr: bool,
         maybe_symbols: ?SymbolTable,
     ) !void {
@@ -119,12 +120,8 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn print(self: Self, writer: anytype, symbols: SymbolTable) !void {
+    pub fn print(self: Self, writer: RuntimeWriter, symbols: SymbolTable) !void {
         const maybe_symbols = if (pretty_print_symbols) symbols else null;
         return self.format_internal(writer, false, maybe_symbols);
-    }
-
-    pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        return self.format_internal(writer, false, null);
     }
 };

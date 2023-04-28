@@ -9,6 +9,7 @@ const lexer = @import("lexer.zig");
 const parse = @import("parser.zig").parse;
 const Evaluator = @import("Evaluator.zig");
 const Gc = @import("Gc.zig");
+const RuntimeWriter = @import("RuntimeWriter.zig");
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
@@ -19,17 +20,18 @@ pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var stdout_bw = std.io.bufferedWriter(stdout_file);
     defer stdout_bw.flush() catch {};
-    const stdout = stdout_bw.writer();
+    const stdout = RuntimeWriter.fromBufferedWriter(&stdout_bw);
+    try stdout_bw.flush();
     const stderr_file = std.io.getStdErr().writer();
     var stderr_bw = std.io.bufferedWriter(stderr_file);
     defer stderr_bw.flush() catch {};
-    const stderr = stderr_bw.writer();
+    const stderr = RuntimeWriter.fromBufferedWriter(&stderr_bw);
 
     var symbol_table = SymbolTable.init(alloc, alloc);
     defer symbol_table.deinit();
     var gc = Gc.init(alloc, alloc);
     defer gc.deinit();
-    var evaluator: Evaluator = try Evaluator.init(alloc, &gc, &symbol_table);
+    var evaluator: Evaluator = try Evaluator.init(alloc, &gc, &symbol_table, stdout);
     defer evaluator.deinit();
     var buffer = std.ArrayList(u8).init(alloc);
     defer buffer.deinit();

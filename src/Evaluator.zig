@@ -7,10 +7,13 @@ const SymbolTable = @import("SymbolTable.zig");
 const Type = @import("value.zig").Type;
 const Value = @import("value.zig").Value;
 const Gc = @import("Gc.zig");
+const RuntimeWriter = @import("RuntimeWriter.zig");
 
 map: Map,
 gc: *Gc,
 visit_stack: std.ArrayListUnmanaged(Value) = .{},
+writer: RuntimeWriter,
+symbol_table: *SymbolTable,
 
 pub const Variable = struct { symbol: i32, value: Value };
 pub const Map = std.ArrayList(Variable);
@@ -160,6 +163,23 @@ const primitive_impls = struct {
         const cons = try self.gc.create_cons(cons_inner);
         return .{ .value = .{ .cons = cons } };
     }
+    fn begin(self: *Self, list_: ?Value.Cons) !EvalOutput {
+        const old_len = self.map.items.len;
+        defer self.map.shrinkRetainingCapacity(old_len);
+        var list = list_;
+        var yielded_value: Value = .nil;
+        while (list) |cons| {
+            list = switch (cons.cdr.toListPartial()) {
+                .list => |meow| meow,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+            yielded_value = switch (try self.eval(cons.car)) {
+                .value => |v| v,
+                else => |e| return e,
+            };
+        }
+        return .{ .value = yielded_value };
+    }
     fn create_lambda(self: *Self, list: ?Value.Cons) !EvalOutput {
         const cons_args = switch (getArgsNoEval(2, list)) {
             .args => |a| a,
@@ -236,7 +256,7 @@ const primitive_impls = struct {
                 .value => |v| v,
                 else => |e| return e,
             };
-            sum += switch (arg) {
+            sum +%= switch (arg) {
                 .int => |i| i,
                 else => |v| return .{ .eval_error = .{ .expected_type = .{
                     .expected = TypeMask.new(&.{.int}),
@@ -246,9 +266,21 @@ const primitive_impls = struct {
         }
         return .{ .value = .{ .int = sum } };
     }
+    fn print(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(1, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const arg = args[0];
+        try self.print_value(arg);
+        return .{ .value = arg };
+    }
+    fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
+        return .{ .eval_error = .{ .todo = "unimplemented function" } };
+    }
 };
 
-pub const PrimitiveImpl = *const fn (*Self, ?Value.Cons) AllocError!EvalOutput;
+pub const PrimitiveImpl = *const fn (*Self, ?Value.Cons) anyerror!EvalOutput;
 const PrimitiveEntry = struct {
     name: []const u8,
     impl: PrimitiveImpl,
@@ -256,12 +288,24 @@ const PrimitiveEntry = struct {
 pub const primitive_functions = [_]PrimitiveEntry{
     .{ .name = "quote", .impl = primitive_impls.quote },
     .{ .name = "atom?", .impl = primitive_impls.atom },
+    .{ .name = "nil?", .impl = primitive_impls.todo },
+    .{ .name = "cons?", .impl = primitive_impls.todo },
+    .{ .name = "int?", .impl = primitive_impls.todo },
+    .{ .name = "bool?", .impl = primitive_impls.todo },
+    .{ .name = "symbol?", .impl = primitive_impls.todo },
+    .{ .name = "primitive?", .impl = primitive_impls.todo },
+    .{ .name = "lambda?", .impl = primitive_impls.todo },
+    .{ .name = "function?", .impl = primitive_impls.todo },
     .{ .name = "eq?", .impl = primitive_impls.eq },
     .{ .name = "car", .impl = primitive_impls.car },
     .{ .name = "cdr", .impl = primitive_impls.cdr },
     .{ .name = "cons", .impl = primitive_impls.create_cons },
+    .{ .name = "cond", .impl = primitive_impls.todo },
+    .{ .name = "define", .impl = primitive_impls.todo },
+    .{ .name = "begin", .impl = primitive_impls.begin },
     .{ .name = "lambda", .impl = primitive_impls.create_lambda },
     .{ .name = "+", .impl = primitive_impls.add },
+    .{ .name = "print", .impl = primitive_impls.print },
 };
 
 pub const EvalError = union(enum) {
@@ -273,7 +317,7 @@ pub const EvalError = union(enum) {
     not_enough_args,
     todo: []const u8,
 
-    pub fn print(self: @This(), writer: anytype, symbols: SymbolTable) !void {
+    pub fn print(self: @This(), writer: RuntimeWriter, symbols: SymbolTable) !void {
         return switch (self) {
             .variable_not_found => |s| writer.print(
                 "variable `{s}` not defined",
@@ -323,6 +367,7 @@ pub fn init(
     evaluator_alloc: Allocator,
     gc: *Gc,
     symbol_table: *SymbolTable,
+    writer: RuntimeWriter,
 ) AllocError!Self {
     const len = primitive_functions.len;
     try symbol_table.ensureUnusedCapacity(len);
@@ -334,7 +379,7 @@ pub fn init(
         const symbol = try symbol_table.put(identifier);
         map.appendAssumeCapacity(.{ .symbol = symbol, .value = value });
     }
-    return .{ .map = map, .gc = gc };
+    return .{ .map = map, .gc = gc, .writer = writer, .symbol_table = symbol_table };
 }
 
 fn getVar(self: Self, symbol: i32) ?Value {
@@ -345,6 +390,11 @@ fn getVar(self: Self, symbol: i32) ?Value {
         if (entry.symbol == symbol) return entry.value;
         if (i == 0) return null else i -= 1;
     }
+}
+
+fn print_value(self: Self, value: Value) anyerror!void {
+    try value.print(self.writer, self.symbol_table.*);
+    try self.writer.writeByte('\n');
 }
 
 pub fn eval(self: *Self, value: Value) !EvalOutput {
@@ -392,7 +442,6 @@ pub fn eval(self: *Self, value: Value) !EvalOutput {
                     return self.eval(lambda.body);
                 },
                 else => return .{ .eval_error = .{ .cannot_call = function } },
-                // (((lambda x (lambda y (+ x y))) 34) 35)
             }
         },
     }
