@@ -115,6 +115,25 @@ fn getArgs(
     return .{ .args = args };
 }
 
+fn is_type(comptime types: anytype) PrimitiveImpl {
+    return struct {
+        fn f(self: *Self, list: ?Value.Cons) !EvalOutput {
+            const arg = switch (try getArgs(1, self, list)) {
+                .args => |a| a[0],
+                .eval_error => |e| return .{ .eval_error = e },
+            };
+            const arg_is_type = inline for (types) |type_| {
+                if (arg == type_) break true;
+            } else false;
+            return .{ .value = .{ .bool = arg_is_type } };
+        }
+    }.f;
+}
+
+fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
+    return .{ .eval_error = .{ .todo = "unimplemented function" } };
+}
+
 const primitive_impls = struct {
     fn quote(_: *Self, list_: ?Value.Cons) !EvalOutput {
         const cons = list_ orelse return .{ .value = .nil };
@@ -124,26 +143,15 @@ const primitive_impls = struct {
         }
         return .{ .value = cons.car };
     }
-    fn @"atom?"(self: *Self, list: ?Value.Cons) !EvalOutput {
-        const cons = list orelse return .{ .value = .nil };
-        switch (cons.cdr.toListPartial()) {
-            .list => |v| if (v) |_| return .{ .eval_error = .{ .extra_args = cons.cdr } },
-            .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
-        }
-        const arg = switch (try self.eval(cons.car)) {
-            .value => |v| v,
-            else => |e| return e,
-        };
-        return .{ .value = .{ .bool = arg != .cons } };
-    }
-    const @"nil?" = todo;
-    const @"cons?" = todo;
-    const @"int?" = todo;
-    const @"bool?" = todo;
-    const @"symbol?" = todo;
-    const @"primitive?" = todo;
-    const @"lambda?" = todo;
-    const @"function?" = todo;
+    const @"atom?" = is_type(.{ .nil, .int, .bool, .symbol, .primitive_function, .lambda });
+    const @"nil?" = is_type(.{.nil});
+    const @"cons?" = is_type(.{.cons});
+    const @"int?" = is_type(.{.int});
+    const @"bool?" = is_type(.{.bool});
+    const @"symbol?" = is_type(.{.symbol});
+    const @"primitive?" = is_type(.{.primitive_function});
+    const @"lambda?" = is_type(.{.lambda});
+    const @"function?" = is_type(.{ .primitive_function, .lambda });
     fn @"eq?"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
             .args => |a| a,
@@ -337,9 +345,6 @@ const primitive_impls = struct {
         return .{ .value = arg };
     }
 };
-fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
-    return .{ .eval_error = .{ .todo = "unimplemented function" } };
-}
 
 pub const PrimitiveImpl = *const fn (*Self, ?Value.Cons) anyerror!EvalOutput;
 const PrimitiveEntry = struct {
