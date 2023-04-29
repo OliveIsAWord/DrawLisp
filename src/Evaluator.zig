@@ -198,7 +198,36 @@ const primitive_impls = struct {
         const cons = try self.gc.create_cons(cons_inner);
         return .{ .value = .{ .cons = cons } };
     }
-    const @"cond" = todo;
+    fn cond(self: *Self, list_: ?Value.Cons) !EvalOutput {
+        var list = list_;
+        while (list) |cons| {
+            const branch = switch (cons.car.toListPartial()) {
+                .list => |v| v,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } }, 
+            };
+            list = switch (cons.cdr.toListPartial()) {
+                .list => |v| v,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } }, 
+            };
+            const out = switch (getArgsNoEvalPartial(1, branch)) {
+                .args => |a| a,
+                .eval_error => |e| return .{ .eval_error = e },
+            };
+            const body = out.rest orelse return .{ .eval_error = .not_enough_args };
+            const condition = switch (try self.eval(out.first[0])) {
+                .value => |v| switch (v) {
+                    .bool => |b| b,
+                    else => |e| return .{ .eval_error = .{ .expected_type = .{
+                        .expected = TypeMask.new(&.{.bool}),
+                        .found = e,
+                    } } },
+                },
+                else => |e| return e,
+            };
+            if (condition) return begin(self, body);
+        }
+        return .{ .value = .nil };
+    }
     fn begin(self: *Self, list_: ?Value.Cons) !EvalOutput {
         const old_len = self.map.items.len;
         defer self.map.shrinkRetainingCapacity(old_len);
@@ -245,7 +274,7 @@ const primitive_impls = struct {
                 }
             },
             else => |v| return .{ .eval_error = .{ .expected_type = .{
-                .expected = TypeMask.new(&.{ .cons, .symbol }),
+                .expected = TypeMask.new(&.{ .nil, .cons, .symbol }),
                 .found = v,
             } } },
         }
