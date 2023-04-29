@@ -86,5 +86,6 @@ pub fn main() !void {
         try yielded_value.print(stdout, symbol_table);
         try stdout.writeByte('\n');
         try stdout_bw.flush();
+        for (evaluator.map.items) |variable| try gc.mark(variable.value);
     }
 }

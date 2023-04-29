@@ -273,9 +273,29 @@ const primitive_impls = struct {
         is_error = false;
         return .{ .value = .{ .lambda = lambda } };
     }
-    // fn define(self: *Self, list: ?Value.Cons) !EvalOutput {
-
-    // }
+    fn define(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const out = switch (getArgsNoEvalPartial(1, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const symbol_to_define = out.first[0];
+        const block = out.rest orelse return .{ .eval_error = .not_enough_args };
+        switch (symbol_to_define) {
+            .symbol => |symbol| {
+                const init_value = switch (try begin(self, block)) {
+                    .value => |v| v,
+                    else => |e| return e,
+                };
+                try self.map.append(.{ .symbol = symbol, .value = init_value });
+                return .{ .value = init_value };
+            },
+            .cons => return .{ .eval_error = .{ .todo = "defining functions" } },
+            else => |e| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{ .symbol, .cons }),
+                .found = e,
+            } } },
+        }
+    }
     fn add(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var sum: i64 = 0;
         var list = list_;
@@ -333,7 +353,7 @@ pub const primitive_functions = [_]PrimitiveEntry{
     .{ .name = "cdr", .impl = primitive_impls.cdr },
     .{ .name = "cons", .impl = primitive_impls.create_cons },
     .{ .name = "cond", .impl = primitive_impls.todo },
-    .{ .name = "define", .impl = primitive_impls.todo },
+    .{ .name = "define", .impl = primitive_impls.define },
     .{ .name = "begin", .impl = primitive_impls.begin },
     .{ .name = "lambda", .impl = primitive_impls.create_lambda },
     .{ .name = "+", .impl = primitive_impls.add },

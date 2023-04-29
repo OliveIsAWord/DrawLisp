@@ -82,10 +82,9 @@ pub fn mark(self: *Self, value: Value) AllocError!void {
         .lambda => |lambda| {
             if (lambda.marked) continue;
             lambda.marked = true;
-            for (lambda.binds) |bind| try self.mark_push(bind);
+            for (lambda.binds) |bind| try self.mark_push(bind.value);
             try self.mark_push(lambda.body);
         },
-        else => {},
     };
 }
 
