@@ -425,9 +425,13 @@ pub fn eval(self: *Self, value: Value) !EvalOutput {
                         const args = arg_list.toListPartial();
                         switch (args) {
                             .list => |list| if (list) |cons| {
+                                const arg_value = switch (try self.eval(cons.car)) {
+                                    .value => |v| v,
+                                    else => |e| return e,
+                                };
                                 self.map.appendAssumeCapacity(.{
                                     .symbol = arg_symbol,
-                                    .value = cons.car,
+                                    .value = arg_value,
                                 });
                                 arg_list = cons.cdr;
                             } else return .{ .eval_error = .not_enough_args },
