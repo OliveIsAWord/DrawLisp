@@ -352,15 +352,21 @@ const PrimitiveEntry = struct {
     impl: PrimitiveImpl,
 };
 pub const primitive_functions = blk: {
+    const show_me_todos = false;
+    var todo_list: []const u8 = &.{};
     const decls = @typeInfo(primitive_impls).Struct.decls;
     var funcs: [decls.len]PrimitiveEntry = undefined;
-    var i = 0;
-    for (decls) |decl| {
+    for (decls) |decl, i| {
         const name = decl.name;
+        const impl = @field(primitive_impls, name);
         const publish_name = if (name[0] == ' ') name[1..] else name;
-        funcs[i] = .{ .name = publish_name, .impl = @field(primitive_impls, name) };
-        i += 1;
+        if (show_me_todos and impl == todo) {
+            if (todo_list.len != 0) todo_list = todo_list ++ ", ";
+            todo_list = todo_list ++ publish_name;
+        }
+        funcs[i] = .{ .name = publish_name, .impl = impl };
     }
+    if (todo_list.len != 0) @compileError("todos: `" ++ todo_list ++ "`");
     break :blk funcs;
 };
 

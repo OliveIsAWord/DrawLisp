@@ -104,7 +104,7 @@ pub const Value = union(Type) {
                 const this_addr = @ptrToInt(func);
                 const name = for (Evaluator.primitive_functions) |entry| {
                     if (this_addr == @ptrToInt(entry.impl)) break entry.name;
-                } else return writer.writeAll("<fn>");
+                } else return writer.writeAll("<private fn>");
                 try writer.print("<fn {s}>", .{name});
             },
             .lambda => |lambda| {
