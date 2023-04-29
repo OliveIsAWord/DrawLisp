@@ -124,7 +124,7 @@ const primitive_impls = struct {
         }
         return .{ .value = cons.car };
     }
-    fn atom(self: *Self, list: ?Value.Cons) !EvalOutput {
+    fn @"atom?"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const cons = list orelse return .{ .value = .nil };
         switch (cons.cdr.toListPartial()) {
             .list => |v| if (v) |_| return .{ .eval_error = .{ .extra_args = cons.cdr } },
@@ -136,7 +136,15 @@ const primitive_impls = struct {
         };
         return .{ .value = .{ .bool = arg != .cons } };
     }
-    fn eq(self: *Self, list: ?Value.Cons) !EvalOutput {
+    const @"nil?" = todo;
+    const @"cons?" = todo;
+    const @"int?" = todo;
+    const @"bool?" = todo;
+    const @"symbol?" = todo;
+    const @"primitive?" = todo;
+    const @"lambda?" = todo;
+    const @"function?" = todo;
+    fn @"eq?"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
@@ -173,7 +181,7 @@ const primitive_impls = struct {
         };
         return .{ .value = x.cdr };
     }
-    fn create_cons(self: *Self, list: ?Value.Cons) !EvalOutput {
+    fn @" cons"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
@@ -182,6 +190,7 @@ const primitive_impls = struct {
         const cons = try self.gc.create_cons(cons_inner);
         return .{ .value = .{ .cons = cons } };
     }
+    const @"cond" = todo;
     fn begin(self: *Self, list_: ?Value.Cons) !EvalOutput {
         const old_len = self.map.items.len;
         defer self.map.shrinkRetainingCapacity(old_len);
@@ -199,7 +208,7 @@ const primitive_impls = struct {
         }
         return .{ .value = yielded_value };
     }
-    fn create_lambda(self: *Self, list: ?Value.Cons) !EvalOutput {
+    fn @" lambda"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const out = switch (getArgsNoEvalPartial(1, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
@@ -273,7 +282,7 @@ const primitive_impls = struct {
         is_error = false;
         return .{ .value = .{ .lambda = lambda } };
     }
-    fn define(self: *Self, list: ?Value.Cons) !EvalOutput {
+    fn let(self: *Self, list: ?Value.Cons) !EvalOutput {
         const out = switch (getArgsNoEvalPartial(1, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
@@ -296,7 +305,7 @@ const primitive_impls = struct {
             } } },
         }
     }
-    fn add(self: *Self, list_: ?Value.Cons) !EvalOutput {
+    fn @"+"(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var sum: i64 = 0;
         var list = list_;
         while (list) |cons| {
@@ -327,37 +336,27 @@ const primitive_impls = struct {
         try self.print_value(arg);
         return .{ .value = arg };
     }
-    fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
-        return .{ .eval_error = .{ .todo = "unimplemented function" } };
-    }
 };
+fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
+    return .{ .eval_error = .{ .todo = "unimplemented function" } };
+}
 
 pub const PrimitiveImpl = *const fn (*Self, ?Value.Cons) anyerror!EvalOutput;
 const PrimitiveEntry = struct {
     name: []const u8,
     impl: PrimitiveImpl,
 };
-pub const primitive_functions = [_]PrimitiveEntry{
-    .{ .name = "quote", .impl = primitive_impls.quote },
-    .{ .name = "atom?", .impl = primitive_impls.atom },
-    .{ .name = "nil?", .impl = primitive_impls.todo },
-    .{ .name = "cons?", .impl = primitive_impls.todo },
-    .{ .name = "int?", .impl = primitive_impls.todo },
-    .{ .name = "bool?", .impl = primitive_impls.todo },
-    .{ .name = "symbol?", .impl = primitive_impls.todo },
-    .{ .name = "primitive?", .impl = primitive_impls.todo },
-    .{ .name = "lambda?", .impl = primitive_impls.todo },
-    .{ .name = "function?", .impl = primitive_impls.todo },
-    .{ .name = "eq?", .impl = primitive_impls.eq },
-    .{ .name = "car", .impl = primitive_impls.car },
-    .{ .name = "cdr", .impl = primitive_impls.cdr },
-    .{ .name = "cons", .impl = primitive_impls.create_cons },
-    .{ .name = "cond", .impl = primitive_impls.todo },
-    .{ .name = "define", .impl = primitive_impls.define },
-    .{ .name = "begin", .impl = primitive_impls.begin },
-    .{ .name = "lambda", .impl = primitive_impls.create_lambda },
-    .{ .name = "+", .impl = primitive_impls.add },
-    .{ .name = "print", .impl = primitive_impls.print },
+pub const primitive_functions = blk: {
+    const decls = @typeInfo(primitive_impls).Struct.decls;
+    var funcs: [decls.len]PrimitiveEntry = undefined;
+    var i = 0;
+    for (decls) |decl| {
+        const name = decl.name;
+        const publish_name = if (name[0] == ' ') name[1..] else name;
+        funcs[i] = .{ .name = publish_name, .impl = @field(primitive_impls, name) };
+        i += 1;
+    }
+    break :blk funcs;
 };
 
 pub const EvalError = union(enum) {
@@ -434,14 +433,21 @@ pub fn init(
     return .{ .map = map, .gc = gc, .writer = writer, .symbol_table = symbol_table };
 }
 
+pub fn printVars(self: Self) !void {
+    for (self.map.items) |variable| {
+        try self.print_value(variable.value);
+    }
+}
+
 fn getVar(self: Self, symbol: i32) ?Value {
     const items = self.map.items;
-    var i = items.len - 1;
-    while (true) {
+    var i = items.len;
+    while (i != 0) {
+        i -= 1;
         const entry = items[i];
         if (entry.symbol == symbol) return entry.value;
-        if (i == 0) return null else i -= 1;
     }
+    return null;
 }
 
 fn print_value(self: Self, value: Value) anyerror!void {
