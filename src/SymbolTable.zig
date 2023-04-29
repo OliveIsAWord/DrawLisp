@@ -36,6 +36,12 @@ pub fn put(self: *Self, symbol: []const u8) AllocError!i32 {
     return self.table.get(symbol).?;
 }
 
+// pub fn get(self: *Self, symbol: []const u8) i32 {
+//     return self.table.get(symbol) orelse {
+//         std.debug.panic("could not find symbol `{}`", .{symbol});
+//     };
+// }
+
 pub fn getOrPut(self: *Self, symbol: []const u8) AllocError!i32 {
     return self.table.get(symbol) orelse return self.put(symbol);
 }

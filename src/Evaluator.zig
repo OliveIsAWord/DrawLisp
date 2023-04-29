@@ -63,7 +63,18 @@ fn GetArgsOutput(comptime num_args: comptime_int) type {
         eval_error: EvalError,
     };
 }
-fn getArgsNoEval(comptime num_args: comptime_int, list_: ?Value.Cons) GetArgsOutput(num_args) {
+
+fn GetArgsPartialOutput(comptime num_args: comptime_int) type {
+    return union(enum) {
+        args: struct { first: [num_args]Value, rest: ?Value.Cons },
+        eval_error: EvalError,
+    };
+}
+
+fn getArgsNoEvalPartial(
+    comptime num_args: comptime_int,
+    list_: ?Value.Cons,
+) GetArgsPartialOutput(num_args) {
     var list = list_;
     var args: [num_args]Value = undefined;
     for (args) |*arg| {
@@ -74,8 +85,16 @@ fn getArgsNoEval(comptime num_args: comptime_int, list_: ?Value.Cons) GetArgsOut
             .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
         };
     }
-    if (list) |extra_args| return .{ .eval_error = .{ .extra_args = extra_args.cdr } };
-    return .{ .args = args };
+    return .{ .args = .{ .first = args, .rest = list } };
+}
+
+fn getArgsNoEval(comptime num_args: comptime_int, list: ?Value.Cons) GetArgsOutput(num_args) {
+    return switch (getArgsNoEvalPartial(num_args, list)) {
+        .args => |out| if (out.rest) |_| .{
+            .eval_error = .{ .todo = "extra args" },
+        } else .{ .args = out.first },
+        .eval_error => |e| .{ .eval_error = e },
+    };
 }
 
 fn getArgs(
@@ -181,14 +200,15 @@ const primitive_impls = struct {
         return .{ .value = yielded_value };
     }
     fn create_lambda(self: *Self, list: ?Value.Cons) !EvalOutput {
-        const cons_args = switch (getArgsNoEval(2, list)) {
+        const out = switch (getArgsNoEvalPartial(1, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
         };
+        const cons_args = out.first[0];
         var args = std.ArrayListUnmanaged(i32){};
         var is_error = true;
         defer if (is_error) args.deinit(self.gc.value_alloc);
-        switch (cons_args[0]) {
+        switch (cons_args) {
             .nil => {},
             .symbol => |symbol| try args.append(self.gc.value_alloc, symbol),
             .cons => |cons| {
@@ -212,8 +232,8 @@ const primitive_impls = struct {
                 .found = v,
             } } },
         }
-        const body = cons_args[1];
-        try self.visit_stack.append(self.map.allocator, body);
+        var body = out.rest orelse return .{ .eval_error = .not_enough_args };
+        try self.visit_stack.append(self.map.allocator, .{ .cons = &body });
         var binds = std.ArrayList(Variable).init(self.gc.value_alloc);
         defer binds.deinit();
         // TODO: binding any variables in lambda.args is redundant
@@ -234,16 +254,28 @@ const primitive_impls = struct {
                 },
             }
         }
+        const runnable_body: Value = if (body.cdr == .nil) body.car else blk: {
+            const cons_body = try self.gc.create_cons(body);
+            const cons_inner = .{
+                .car = .{ .primitive_function = begin },
+                .cdr = .{ .cons = cons_body },
+            };
+            const cons = try self.gc.create_cons(cons_inner);
+            break :blk .{ .cons = cons };
+        };
         var lambda_inner = Value.Lambda{
             .args = args,
             .binds = binds.toOwnedSlice(),
-            .body = body,
+            .body = runnable_body,
         };
         defer if (is_error) lambda_inner.deinit(self.gc.value_alloc);
         const lambda = try self.gc.create_lambda(lambda_inner);
         is_error = false;
         return .{ .value = .{ .lambda = lambda } };
     }
+    // fn define(self: *Self, list: ?Value.Cons) !EvalOutput {
+
+    // }
     fn add(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var sum: i64 = 0;
         var list = list_;
