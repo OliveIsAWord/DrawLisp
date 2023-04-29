@@ -31,7 +31,7 @@ fn is_one_of(comptime chars: anytype) fn (anytype) bool {
     }.f;
 }
 
-const is_whitespace = is_one_of(.{ ' ', '\n', '\t', '\r', '\x0b', '\x0c' });
+const is_whitespace = is_one_of(std.ascii.whitespace);
 
 fn is_delimiter(c: u8) bool {
     return is_whitespace(c) or is_one_of(.{ '\x00', '(', ')', '"', ';', '.' })(c);

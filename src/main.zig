@@ -49,8 +49,15 @@ pub fn main() !void {
             },
             else => return e,
         };
-        if (buffer.items[0] == ';') return;
-        var token_iter = lexer.TokenIterator.init(buffer.items);
+        const input = std.mem.trimLeft(u8, buffer.items, &std.ascii.whitespace);
+        if (input.len == 0) continue;
+        if (input[0] == ';') {
+            const command = std.mem.trimLeft(u8, input[1..], &std.ascii.whitespace);
+            if (command.len == 0) return;
+            _ = .{command};
+            continue;
+        }
+        var token_iter = lexer.TokenIterator.init(input);
         const ast = switch (try parse(&token_iter, alloc, &gc, &symbol_table)) {
             .value => |v| v,
             .parse_error => |e| {
