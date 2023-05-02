@@ -3,6 +3,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AllocError = Allocator.Error;
 
+const lexer = @import("lexer.zig");
+const parser = @import("parser.zig");
 const SymbolTable = @import("SymbolTable.zig");
 const Type = @import("value.zig").Type;
 const Value = @import("value.zig").Value;
@@ -203,11 +205,11 @@ const primitive_impls = struct {
         while (list) |cons| {
             const branch = switch (cons.car.toListPartial()) {
                 .list => |v| v,
-                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } }, 
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
             };
             list = switch (cons.cdr.toListPartial()) {
                 .list => |v| v,
-                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } }, 
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
             };
             const out = switch (getArgsNoEvalPartial(1, branch)) {
                 .args => |a| a,
@@ -373,6 +375,9 @@ const primitive_impls = struct {
         try self.print_value(arg);
         return .{ .value = arg };
     }
+    const @"set!" = todo;
+    const @"set-car!" = todo;
+    const @"set-cdr!" = todo;
 };
 
 pub const PrimitiveImpl = *const fn (*Self, ?Value.Cons) anyerror!EvalOutput;
@@ -452,6 +457,12 @@ pub const EvalOutput = union(enum) {
     fn is_error(self: @This()) bool {
         return self == .eval_error;
     }
+    fn toInterpreterOutput(self: @This()) InterpreterOutput {
+        return switch (self) {
+            .value => |v| .{ .return_value = v },
+            .eval_error => |e| .{ .eval_error = e },
+        };
+    }
 };
 
 pub fn init(
@@ -493,6 +504,98 @@ fn getVar(self: Self, symbol: i32) ?Value {
 fn print_value(self: Self, value: Value) anyerror!void {
     try value.print(self.writer, self.symbol_table.*);
     try self.writer.writeByte('\n');
+}
+
+const EvalSettings = struct {
+    top_level_parens_optional: bool,
+};
+
+const InterpreterOutput = union(enum) {
+    parse_error: parser.ParseError,
+    eval_error: EvalError,
+    return_value: ?Value,
+    pub fn println(self: @This(), writer: RuntimeWriter, symbols: SymbolTable) !void {
+        switch (self) {
+            .parse_error => |e| {
+                try writer.writeAll("Parse error: ");
+                try e.print(writer);
+            },
+            .eval_error => |e| {
+                try writer.writeAll("Eval error: ");
+                try e.print(writer, symbols);
+            },
+            .return_value => |v_| if (v_) |v| try v.print(writer, symbols) else return,
+        }
+        try writer.writeByte('\n');
+    }
+};
+pub fn evalSource(self: *Self, source: []const u8, settings: EvalSettings) !InterpreterOutput {
+    var token_iter = lexer.TokenIterator.init(source);
+    const EvalFolder = union(enum) {
+        last: ?Value,
+        all: Value,
+        fn from_setting(b: bool) @This() {
+            return if (b) .{ .all = .nil } else .{ .last = null };
+        }
+        fn add_value(self2: *@This(), evaluator: *Self, value: Value) !?EvalError {
+            switch (self2.*) {
+                .last => |*last| last.* = switch (try evaluator.eval(value)) {
+                    .value => |v| v,
+                    .eval_error => |e| return e,
+                },
+                .all => |*list| {
+                    const new_last_item = try evaluator.gc.create_cons(.{
+                        .car = value,
+                        .cdr = .nil,
+                    });
+                    var nil_ptr: *Value = list;
+                    while (true) {
+                        nil_ptr = switch (nil_ptr.*) {
+                            .cons => |c| &c.cdr,
+                            .nil => break,
+                            else => unreachable,
+                        };
+                    }
+                    nil_ptr.* = .{ .cons = new_last_item };
+                },
+            }
+            return null;
+        }
+        fn finish(self2: @This(), evaluator: *Self) !InterpreterOutput {
+            switch (self2) {
+                .last => |last| return .{ .return_value = last },
+                .all => |list| {
+                    const cons = switch (list) {
+                        .cons => |c| c,
+                        .nil => return .{ .return_value = null },
+                        else => unreachable,
+                    };
+                    if (cons.cdr == .nil) {
+                        const eval_out = try evaluator.eval(cons.car);
+                        return eval_out.toInterpreterOutput();
+                    }
+                    const eval_out = try evaluator.eval(list);
+                    return eval_out.toInterpreterOutput();
+                },
+            }
+        }
+    };
+    var eval_folder = EvalFolder.from_setting(settings.top_level_parens_optional);
+    while (!token_iter.peek().is_eof_token()) {
+        const parse_out = try parser.parse(
+            &token_iter,
+            self.map.allocator,
+            self.gc,
+            self.symbol_table,
+        );
+        const ast = switch (parse_out) {
+            .value => |v| v,
+            .parse_error => |e| return .{ .parse_error = e },
+        };
+        //std.debug.print("ast: {any}\n", .{ast});
+        if (try eval_folder.add_value(self, ast)) |e| return .{ .eval_error = e };
+    }
+    return eval_folder.finish(self);
 }
 
 pub fn eval(self: *Self, value: Value) !EvalOutput {

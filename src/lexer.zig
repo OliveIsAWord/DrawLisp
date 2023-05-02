@@ -14,10 +14,6 @@ pub const Token = enum {
     boolean_literal,
     identifier,
     eof,
-
-    pub fn is_eof(self: Self) bool {
-        return self == .eof;
-    }
 };
 
 fn is_one_of(comptime chars: anytype) fn (anytype) bool {
@@ -53,7 +49,7 @@ fn eat_whitespace(src_: []const u8) []const u8 {
 
 pub const LexOutput = struct {
     const Self = @This();
-    const Value = union(enum) {
+    pub const Value = union(enum) {
         /// A valid token.
         token: Token,
         /// A token error in the source code.
@@ -66,10 +62,10 @@ pub const LexOutput = struct {
     /// The remaining source code after the token or error.
     rest: []const u8,
 
-    pub fn is_eof(self: Self) bool {
+    pub fn is_eof_token(self: Self) bool {
         return switch (self.value) {
-            .token => |t| t.is_eof(),
-            .lex_error => |e| e.is_eof(),
+            .token => |t| t == .eof,
+            .lex_error => false,
         };
     }
 };
@@ -80,11 +76,16 @@ pub const LexError = union(enum) {
     unexpected_eof,
     invalid_boolean_literal: u8,
 
-    pub fn is_eof(self: Self) bool {
-        return switch (self) {
-            .unexpected_eof => true,
-            else => false,
+    pub fn print(self: Self, writer: anytype) !void {
+        const static_str = switch (self) {
+            .generic => "unknown",
+            .unexpected_eof => "unexpected eof",
+            .invalid_boolean_literal => |c| blk: {
+                try writer.print("invalid boolean literal `{}`", .{c});
+                break :blk null;
+            },
         };
+        if (static_str) |str| try writer.writeAll(str);
     }
 };
 
@@ -177,20 +178,26 @@ pub const TokenIterator = struct {
     original_src: []const u8,
     src: []const u8,
     byte_index: u32 = 0,
+    peeked: ?LexOutput = null,
     pub fn init(src: []const u8) Self {
         return .{ .original_src = src, .src = src };
     }
     pub fn next(self: *Self) LexOutput {
+        if (self.peeked) |peeked| {
+            const out = peeked; // TODO: is this necessary?
+            self.peeked = null;
+            return out;
+        }
         const out = lex(self.src);
         //print("\"{s}\" => {any}\n", .{ out.span, out.value });
         self.byte_index += ptr_dist(self.src.ptr, out.rest.ptr);
         self.src = out.rest;
         return out;
     }
-    pub fn assertEof(self: *Self) bool {
-        return switch (self.next().value) {
-            .token => |t| t == .eof,
-            else => false,
-        };
+    pub fn peek(self: *Self) LexOutput {
+        if (self.peeked) |peeked| return peeked;
+        const peeked = self.next();
+        self.peeked = peeked;
+        return peeked;
     }
 };

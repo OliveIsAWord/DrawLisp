@@ -24,6 +24,16 @@ pub const ParseError = struct {
         todo: []const u8,
     },
     span: Span,
+
+    pub fn print(self: @This(), writer: anytype) !void {
+        switch (self.kind) {
+            .lex_error => |e| try e.print(writer),
+            .todo => |msg| {
+                try writer.print("TODO: {s}", .{msg});
+            },
+            else => try writer.print("{any}", .{self}),
+        }
+    }
 };
 
 pub const ParseOutput = union(enum) {
