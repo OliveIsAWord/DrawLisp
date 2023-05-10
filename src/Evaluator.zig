@@ -294,7 +294,11 @@ const primitive_impls = struct {
             .nil => cons.car,
             else => |e| return .{ .eval_error = .{ .extra_args = e } },
         } else .nil;
-        const body_to_eval = switch (condition) {
+        const evaled_condition = switch (try self.eval(condition)) {
+            .value => |v| v,
+            else => |e| return e,
+        };
+        const body_to_eval = switch (evaled_condition) {
             .bool => |b| if (b) true_body else false_body,
             else => |v| return .{ .eval_error = .{ .expected_type = .{
                 .expected = TypeMask.new(&.{.bool}),
