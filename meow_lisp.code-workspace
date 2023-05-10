@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../meow_lisp"
+		},
+		{
+			"path": "../sdl2_test"
+		},
+		{
+			"path": "../../dev/SDL2/include"
+		}
+	],
+	"settings": {}
+}

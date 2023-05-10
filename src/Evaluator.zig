@@ -2,6 +2,8 @@ const Self = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AllocError = Allocator.Error;
+const Thread = std.Thread;
+const math = std.math;
 
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
@@ -10,12 +12,18 @@ const Type = @import("value.zig").Type;
 const Value = @import("value.zig").Value;
 const Gc = @import("Gc.zig");
 const RuntimeWriter = @import("RuntimeWriter.zig");
+const canvas_runner = @import("canvas_runner.zig");
+const CanvasMessage = canvas_runner.Message;
+const Queue = @import("mpmc_queue.zig").MPMCQueueUnmanaged;
 
 map: Map,
 gc: *Gc,
 visit_stack: std.ArrayListUnmanaged(Value) = .{},
 writer: RuntimeWriter,
 symbol_table: *SymbolTable,
+draw_queue: *Queue(CanvasMessage),
+draw_error_queue: *Queue([]const u8),
+draw_thread: Thread,
 
 pub const Variable = struct { symbol: i32, value: Value };
 pub const Map = std.ArrayList(Variable);
@@ -62,6 +70,13 @@ const TypeMask = MaskFromEnum(Type);
 fn GetArgsOutput(comptime num_args: comptime_int) type {
     return union(enum) {
         args: [num_args]Value,
+        eval_error: EvalError,
+    };
+}
+
+fn GetCintArgsOutput(comptime num_args: comptime_int) type {
+    return union(enum) {
+        args: [num_args]c_int,
         eval_error: EvalError,
     };
 }
@@ -117,6 +132,38 @@ fn getArgs(
     return .{ .args = args };
 }
 
+fn getCintArgs(
+    comptime num_args: comptime_int,
+    self: *Self,
+    list: ?Value.Cons,
+) !GetCintArgsOutput(num_args) {
+    var args = switch (getArgsNoEval(num_args, list)) {
+        .args => |a| a,
+        .eval_error => |e| return .{ .eval_error = e },
+    };
+    for (args) |*arg| {
+        switch (try self.eval(arg.*)) {
+            .value => |v| arg.* = v,
+            .eval_error => |e| return .{ .eval_error = e },
+        }
+    }
+    var ints: [num_args]c_int = undefined;
+    for (args) |arg, i| {
+        switch (arg) {
+            .int => |v| if (cast_cint(v)) |cint| {
+                ints[i] = cint;
+            } else return .{
+                .eval_error = .{ .out_of_cint_range = v },
+            },
+            else => return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.int}),
+                .found = arg,
+            } } },
+        }
+    }
+    return .{ .args = ints };
+}
+
 fn is_type(comptime types: anytype) PrimitiveImpl {
     return struct {
         fn f(self: *Self, list: ?Value.Cons) !EvalOutput {
@@ -134,6 +181,12 @@ fn is_type(comptime types: anytype) PrimitiveImpl {
 
 fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
     return .{ .eval_error = .{ .todo = "unimplemented function" } };
+}
+
+/// Fallibly casts any integer type to a non-negative `c_int`
+fn cast_cint(int: anytype) ?c_int {
+    const i = math.cast(c_int, int) orelse return null;
+    return if (i >= 0) i else null;
 }
 
 const primitive_impls = struct {
@@ -373,11 +426,45 @@ const primitive_impls = struct {
         };
         const arg = args[0];
         try self.print_value(arg);
-        return .{ .value = arg };
+        return .{ .value = .nil };
     }
     const @"set!" = todo;
     const @"set-car!" = todo;
     const @"set-cdr!" = todo;
+
+    fn @"create-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const dimensions: [2]c_int = if (list == null) .{ 500, 500 } else switch (try getCintArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const width = dimensions[0];
+        const height = dimensions[1];
+        self.draw_queue.push(.{ .create_window = .{ .width = width, .height = height } });
+        return .{ .value = .nil };
+    }
+
+    fn clear(self: *Self, list: ?Value.Cons) !EvalOutput {
+        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        self.draw_queue.push(.clear);
+        return .{ .value = .nil };
+    }
+
+    fn pixel(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const coordinates = switch (try getCintArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const x = coordinates[0];
+        const y = coordinates[1];
+        self.draw_queue.push(.{ .pixel = .{ .x = x, .y = y } });
+        return .{ .value = .nil };
+    }
+
+    fn @"destroy-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        self.draw_queue.push(.destroy_window);
+        return .{ .value = .nil };
+    }
 };
 
 pub const PrimitiveImpl = *const fn (*Self, ?Value.Cons) anyerror!EvalOutput;
@@ -411,6 +498,8 @@ pub const EvalError = union(enum) {
     expected_type: struct { expected: TypeMask, found: Value },
     extra_args: Value,
     not_enough_args,
+    //sdl_error: []const u8,
+    out_of_cint_range: i64,
     todo: []const u8,
 
     pub fn print(self: @This(), writer: RuntimeWriter, symbols: SymbolTable) !void {
@@ -445,6 +534,11 @@ pub const EvalError = union(enum) {
                 try writer.writeByte('`');
             },
             .not_enough_args => try writer.writeAll("not enough args"),
+            .out_of_cint_range => |i| try writer.print(
+                "integer {} out of range (must be between 0 and {})",
+                .{ i, math.maxInt(c_int) },
+            ),
+            //.sdl_error => |msg| try writer.print("SDL error \"{s}\"", .{msg}),
             .todo => |msg| try writer.print("TODO \"{s}\"", .{msg}),
         };
     }
@@ -470,7 +564,7 @@ pub fn init(
     gc: *Gc,
     symbol_table: *SymbolTable,
     writer: RuntimeWriter,
-) AllocError!Self {
+) !Self {
     const len = primitive_functions.len;
     try symbol_table.ensureUnusedCapacity(len);
     var map = try Map.initCapacity(evaluator_alloc, len);
@@ -481,7 +575,31 @@ pub fn init(
         const symbol = try symbol_table.put(identifier);
         map.appendAssumeCapacity(.{ .symbol = symbol, .value = value });
     }
-    return .{ .map = map, .gc = gc, .writer = writer, .symbol_table = symbol_table };
+    var draw_queue = try Queue(CanvasMessage).init(evaluator_alloc, 8);
+    errdefer draw_queue.deinit(evaluator_alloc);
+    var draw_error_queue = try Queue([]const u8).init(evaluator_alloc, 8);
+    errdefer draw_error_queue.deinit(evaluator_alloc);
+    var draw_queue_ptr = try evaluator_alloc.create(Queue(CanvasMessage));
+    errdefer evaluator_alloc.destroy(draw_queue_ptr);
+    var draw_error_queue_ptr = try evaluator_alloc.create(Queue([]const u8));
+    errdefer evaluator_alloc.destroy(draw_error_queue_ptr);
+    draw_queue_ptr.* = draw_queue;
+    draw_error_queue_ptr.* = draw_error_queue;
+    var draw_thread = try Thread.spawn(
+        .{},
+        canvas_runner.run,
+        .{ draw_queue_ptr, draw_error_queue_ptr },
+    );
+    draw_thread.setName("draw") catch {};
+    return .{
+        .map = map,
+        .gc = gc,
+        .writer = writer,
+        .symbol_table = symbol_table,
+        .draw_queue = draw_queue_ptr,
+        .draw_error_queue = draw_error_queue_ptr,
+        .draw_thread = draw_thread,
+    };
 }
 
 pub fn printVars(self: Self) !void {
@@ -595,10 +713,21 @@ pub fn evalSource(self: *Self, source: []const u8, settings: EvalSettings) !Inte
         //std.debug.print("ast: {any}\n", .{ast});
         if (try eval_folder.add_value(self, ast)) |e| return .{ .eval_error = e };
     }
-    return eval_folder.finish(self);
+    const out = eval_folder.finish(self);
+    // Give time for draw errors to propogate.
+    std.time.sleep(std.time.ns_per_s / 60);
+    self.flushDrawErrorQueue();
+    return out;
+}
+
+pub fn flushDrawErrorQueue(self: *Self) void {
+    while (self.draw_error_queue.popOrNull()) |msg| {
+        std.debug.print("Renderer error: {s}\n", .{msg});
+    }
 }
 
 pub fn eval(self: *Self, value: Value) !EvalOutput {
+    self.flushDrawErrorQueue();
     switch (value) {
         .nil, .bool, .int, .primitive_function, .lambda => return .{ .value = value },
         .symbol => |s| if (self.getVar(s)) |v| return .{ .value = v } else {
@@ -650,10 +779,20 @@ pub fn eval(self: *Self, value: Value) !EvalOutput {
             }
         },
     }
+    self.flushDrawErrorQueue();
 }
 
 pub fn deinit(self: *Self) void {
     self.visit_stack.deinit(self.map.allocator);
     self.map.deinit();
+    self.flushDrawErrorQueue();
+    self.draw_queue.push(.kill);
+    self.draw_thread.join();
+    std.debug.assert(self.draw_queue.empty());
+    std.debug.assert(self.draw_error_queue.empty());
+    self.draw_queue.deinit(self.map.allocator);
+    self.draw_error_queue.deinit(self.map.allocator);
+    self.map.allocator.destroy(self.draw_queue);
+    self.map.allocator.destroy(self.draw_error_queue);
     self.* = undefined;
 }

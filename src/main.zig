@@ -63,6 +63,7 @@ pub fn main() !void {
                 else => return e,
             },
         };
+        evaluator.flushDrawErrorQueue();
         if (input.len == 0) continue;
         if (input[0] == ';') {
             const command = std.mem.trimLeft(u8, input[1..], &std.ascii.whitespace);
@@ -76,6 +77,7 @@ pub fn main() !void {
         try eval_output.println(stdout, symbol_table);
         try stdout_bw.flush();
         for (evaluator.map.items) |variable| try gc.mark(variable.value);
+        evaluator.flushDrawErrorQueue();
     }
 }
 

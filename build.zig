@@ -16,6 +16,14 @@ pub fn build(b: *std.build.Builder) void {
     exe.setBuildMode(mode);
     exe.install();
 
+    const sdl_path = "D:\\dev\\SDL2\\";
+    exe.addIncludePath(sdl_path ++ "include");
+    exe.addLibraryPath(sdl_path ++ "lib\\x64");
+    b.installBinFile(sdl_path ++ "lib\\x64\\SDL2.dll", "SDL2.dll");
+    exe.linkSystemLibrary("sdl2");
+    exe.linkLibC();
+    exe.install();
+
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
