@@ -283,6 +283,26 @@ const primitive_impls = struct {
         }
         return .{ .value = .nil };
     }
+    fn @"if"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const out = switch (getArgsNoEvalPartial(2, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const condition = out.first[0];
+        const true_body = out.first[1];
+        const false_body = if (out.rest) |cons| switch (cons.cdr) {
+            .nil => cons.car,
+            else => |e| return .{ .eval_error = .{ .extra_args = e } },
+        } else .nil;
+        const body_to_eval = switch (condition) {
+            .bool => |b| if (b) true_body else false_body,
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.bool}),
+                .found = v,
+            } } },
+        };
+        return self.eval(body_to_eval);
+    }
     fn begin(self: *Self, list_: ?Value.Cons) !EvalOutput {
         const old_len = self.map.items.len;
         defer self.map.shrinkRetainingCapacity(old_len);
