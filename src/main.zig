@@ -12,6 +12,7 @@ const Gc = @import("Gc.zig");
 const RuntimeWriter = @import("RuntimeWriter.zig");
 
 const cli_ = .{ .interactive = .{} };
+const stdlib_source = @embedFile("std.lisp");
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
@@ -27,7 +28,7 @@ pub fn main() !void {
     const stderr_file = std.io.getStdErr().writer();
     var stderr_bw = std.io.bufferedWriter(stderr_file);
     defer stderr_bw.flush() catch {};
-    //const stderr = RuntimeWriter.fromBufferedWriter(&stderr_bw);
+    const stderr = RuntimeWriter.fromBufferedWriter(&stderr_bw);
 
     var symbol_table = SymbolTable.init(alloc, alloc);
     defer symbol_table.deinit();
@@ -35,15 +36,29 @@ pub fn main() !void {
     defer gc.deinit();
     var evaluator: Evaluator = try Evaluator.init(alloc, &gc, &symbol_table, stdout);
     defer evaluator.deinit();
+    {
+        const stdlib_eval_out = try evaluator.evalSource(
+            stdlib_source,
+            .{ .top_level_parens_optional = false },
+        );
+        if (stdlib_eval_out != .return_value) {
+            stderr.writeAll("Error while compiling standard library\n") catch {};
+            stdlib_eval_out.println(stderr, symbol_table) catch {};
+            stderr_bw.flush() catch {};
+            return;
+        }
+    }
     var buffer = SourceBuffer.init(alloc);
     defer buffer.deinit();
     var skip_prompt = false;
     while (true) {
+        defer evaluator.flushDrawErrorQueue();
         defer gc.sweep();
         if (!skip_prompt and buffer.outstanding_parens == 0) {
             try stdout.writeAll("> ");
             try stdout_bw.flush();
-        } else skip_prompt = false;
+        }
+        skip_prompt = false;
         const input = switch (buffer.readExpressions(stdin)) {
             .ok => |source| std.mem.trimLeft(u8, source, &std.ascii.whitespace),
             .incomplete => continue,
@@ -63,7 +78,6 @@ pub fn main() !void {
                 else => return e,
             },
         };
-        evaluator.flushDrawErrorQueue();
         if (input.len == 0) continue;
         if (input[0] == ';') {
             const command = std.mem.trimLeft(u8, input[1..], &std.ascii.whitespace);
@@ -77,7 +91,6 @@ pub fn main() !void {
         try eval_output.println(stdout, symbol_table);
         try stdout_bw.flush();
         for (evaluator.map.items) |variable| try gc.mark(variable.value);
-        evaluator.flushDrawErrorQueue();
     }
 }
 
