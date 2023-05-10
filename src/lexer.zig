@@ -81,7 +81,7 @@ pub const LexError = union(enum) {
             .generic => "unknown",
             .unexpected_eof => "unexpected eof",
             .invalid_boolean_literal => |c| blk: {
-                try writer.print("invalid boolean literal `{}`", .{c});
+                try writer.print("invalid boolean literal `{c}`", .{c});
                 break :blk null;
             },
         };
