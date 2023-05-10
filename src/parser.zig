@@ -123,16 +123,6 @@ pub fn parse(
                 };
                 break :blk .{ .int = int };
             },
-            .boolean_literal => blk: {
-                assert(token.span.len == 2);
-                assert(token.span[0] == '#');
-                const boolean = switch (token.span[1]) {
-                    't' => true,
-                    'f' => false,
-                    else => unreachable,
-                };
-                break :blk .{ .bool = boolean };
-            },
             .identifier => blk: {
                 const index = try symbols.getOrPut(token.span);
                 break :blk .{ .symbol = index };

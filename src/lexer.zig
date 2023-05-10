@@ -11,7 +11,6 @@ pub const Token = enum {
     quote,
     dot,
     integer_literal,
-    boolean_literal,
     identifier,
     eof,
 };
@@ -107,23 +106,6 @@ const lexers = struct {
     const lex_paren_close = lex_exact(.paren_close, ")");
     const lex_quote = lex_exact(.quote, "'");
     const lex_dot = lex_exact(.dot, ".");
-    fn lex_bool(in: []const u8) ?LexOutput {
-        if (in[0] != '#') return null;
-        if (in.len < 2) return .{
-            .value = .{ .lex_error = .unexpected_eof },
-            .span = in,
-            .rest = in[1..],
-        };
-        const value: LexOutput.Value = switch (in[1]) {
-            't', 'f' => .{ .token = .boolean_literal },
-            else => |other| .{ .lex_error = .{ .invalid_boolean_literal = other } },
-        };
-        return .{
-            .value = value,
-            .span = in[0..2],
-            .rest = in[2..],
-        };
-    }
     fn lex_integer_literal(src: []const u8) ?LexOutput {
         const minus_offset = @boolToInt(src[0] == '-');
         var i: usize = minus_offset;

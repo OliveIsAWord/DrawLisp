@@ -98,7 +98,7 @@ pub const Value = union(Type) {
                 if (!am_in_cdr) try writer.writeAll(")");
             },
             .int => |i| try writer.print("{}", .{i}),
-            .bool => |b| try writer.writeAll(if (b) "#t" else "#f"),
+            .bool => |b| try writer.writeAll(if (b) "true" else "false"),
             .symbol => |index| try Self.print_symbol(index, writer, maybe_symbols),
             .primitive_function => |func| {
                 const this_addr = @ptrToInt(func);
