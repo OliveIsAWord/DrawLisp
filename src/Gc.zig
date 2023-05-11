@@ -111,3 +111,10 @@ pub fn deinit(self: *Self) void {
     self.to_mark.deinit(self.gc_alloc);
     self.* = undefined;
 }
+
+pub fn deinitAndSweep(self: *Self) void {
+    for (self.all_allocations.items) |a| {
+        a.deinit(self.value_alloc);
+    }
+    self.deinit();
+}

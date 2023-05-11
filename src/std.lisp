@@ -15,3 +15,4 @@
     (true true))))
 
 ; (let compose (lambda (f g) (lambda x (f (g x)))))
+(let reduce (lambda (op list) (fold op (car list) (cdr list))))

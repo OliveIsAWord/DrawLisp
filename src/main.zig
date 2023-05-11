@@ -14,6 +14,10 @@ const RuntimeWriter = @import("RuntimeWriter.zig");
 const cli_ = .{ .interactive = .{} };
 const stdlib_source = @embedFile("std.lisp");
 
+const StartupError = error{
+    BadStdlib,
+};
+
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer _ = gpa.deinit();
@@ -37,6 +41,7 @@ pub fn main() !void {
     var evaluator: Evaluator = try Evaluator.init(alloc, &gc, &symbol_table, stdout);
     defer evaluator.deinit();
     {
+        errdefer gc.sweep();
         const stdlib_eval_out = try evaluator.evalSource(
             stdlib_source,
             .{ .top_level_parens_optional = false },
@@ -45,7 +50,7 @@ pub fn main() !void {
             stderr.writeAll("Error while compiling standard library\n") catch {};
             stdlib_eval_out.println(stderr, symbol_table) catch {};
             stderr_bw.flush() catch {};
-            return;
+            return StartupError.BadStdlib;
         }
     }
     var buffer = SourceBuffer.init(alloc);

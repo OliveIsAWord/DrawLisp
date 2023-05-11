@@ -183,6 +183,20 @@ fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
     return .{ .eval_error = .{ .todo = "unimplemented function" } };
 }
 
+fn checkedWrappingDiv(dividend: i64, divisor: i64) ?i64 {
+    const min_int: i64 = math.minInt(i64);
+    if (divisor == 0) return null;
+    if (dividend == min_int and divisor == -1) return min_int;
+    return @divFloor(dividend, divisor);
+}
+
+// @divFloor(a, b) * b + @mod(a, b) == a
+// @mod(a, b) == a - @divFloor(a, b) * b
+fn checkedWrappingMod(dividend: i64, divisor: i64) ?i64 {
+    const quotient = checkedWrappingDiv(dividend, divisor) orelse return null;
+    return dividend -% quotient *% divisor;
+}
+
 /// Fallibly casts any integer type to a non-negative `c_int`
 fn cast_cint(int: anytype) ?c_int {
     const i = math.cast(c_int, int) orelse return null;
@@ -252,6 +266,132 @@ const primitive_impls = struct {
         const cons_inner = .{ .car = args[0], .cdr = args[1] };
         const cons = try self.gc.create_cons(cons_inner);
         return .{ .value = .{ .cons = cons } };
+    }
+    fn map(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const out = switch (try getArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const op = out[0];
+        var cur_list = out[1];
+        if (cur_list != .nil and cur_list != .cons) {
+            return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{ .nil, .cons }),
+                .found = cur_list,
+            } } };
+        }
+        var out_list: Value = .nil;
+        var nil_ptr: *Value = undefined;
+        while (true) {
+            const element = switch (cur_list.toListPartial()) {
+                .list => |list2| if (list2) |cons| blk: {
+                    cur_list = cons.cdr;
+                    break :blk cons.car;
+                } else break,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+            // Create and eval `(op element)` without GC allocating
+            // TODO: This could easily be unsound
+            var local_cons1 = .{ .car = element, .cdr = .nil };
+            var local_cons2 = .{ .car = op, .cdr = .{ .cons = &local_cons1 } };
+            const op_call = .{ .cons = &local_cons2 };
+            const out_element = switch (try self.eval(op_call)) {
+                .value => |v| v,
+                else => |e| return e,
+            };
+            const new_cons = try self.gc.create_cons(.{ .car = out_element, .cdr = .nil });
+            if (out_list == .nil)
+                out_list = .{ .cons = new_cons }
+            else
+                nil_ptr.* = .{ .cons = new_cons };
+            nil_ptr = &new_cons.cdr;
+        }
+        return .{ .value = out_list };
+    }
+
+    fn filter(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const out = switch (try getArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const op = out[0];
+        var cur_list = out[1];
+        if (cur_list != .nil and cur_list != .cons) {
+            return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{ .nil, .cons }),
+                .found = cur_list,
+            } } };
+        }
+        var out_list: Value = .nil;
+        var nil_ptr: *Value = undefined;
+        while (true) {
+            const element = switch (cur_list.toListPartial()) {
+                .list => |list2| if (list2) |cons| blk: {
+                    cur_list = cons.cdr;
+                    break :blk cons.car;
+                } else break,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+            // Create and eval `(op element)` without GC allocating
+            // TODO: This could easily be unsound
+            var local_cons1 = .{ .car = element, .cdr = .nil };
+            var local_cons2 = .{ .car = op, .cdr = .{ .cons = &local_cons1 } };
+            const op_call = .{ .cons = &local_cons2 };
+            const should_retain = switch (try self.eval(op_call)) {
+                .value => |v| switch (v) {
+                    .bool => |b| b,
+                    else => |bad_type| return .{ .eval_error = .{ .expected_type = .{
+                        .expected = TypeMask.new(&.{.bool}),
+                        .found = bad_type,
+                    } } },
+                },
+                else => |e| return e,
+            };
+            if (should_retain) {
+                const new_cons = try self.gc.create_cons(.{ .car = element, .cdr = .nil });
+                if (out_list == .nil)
+                    out_list = .{ .cons = new_cons }
+                else
+                    nil_ptr.* = .{ .cons = new_cons };
+                nil_ptr = &new_cons.cdr;
+            }
+        }
+        return .{ .value = out_list };
+    }
+    fn fold(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const out = switch (try getArgs(3, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const op = out[0];
+        var accumulator = out[1];
+        var cur_list = out[2];
+        if (cur_list != .nil and cur_list != .cons) {
+            return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{ .nil, .cons }),
+                .found = cur_list,
+            } } };
+        }
+        while (true) {
+            const element = switch (cur_list.toListPartial()) {
+                .list => |list2| if (list2) |cons| blk: {
+                    cur_list = cons.cdr;
+                    break :blk cons.car;
+                } else break,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+            // Create and eval `(op accumulator element)` without GC allocating
+            // TODO: This could easily be unsound
+            var local_cons1 = .{ .car = element, .cdr = .nil };
+            var local_cons2 = .{ .car = accumulator, .cdr = .{ .cons = &local_cons1 } };
+            var local_cons3 = .{ .car = op, .cdr = .{ .cons = &local_cons2 } };
+            const op_call = .{ .cons = &local_cons3 };
+            accumulator = switch (try self.eval(op_call)) {
+                .value => |v| v,
+                else => |e| return e,
+            };
+        }
+        return .{ .value = accumulator };
     }
     fn cond(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var list = list_;
@@ -443,6 +583,134 @@ const primitive_impls = struct {
         }
         return .{ .value = .{ .int = sum } };
     }
+    // We do a little code duplication :3
+    fn @"*"(self: *Self, list_: ?Value.Cons) !EvalOutput {
+        var product: i64 = 1;
+        var list = list_;
+        while (list) |cons| {
+            list = switch (cons.cdr.toListPartial()) {
+                .list => |meow| meow,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+            const arg = switch (try self.eval(cons.car)) {
+                .value => |v| v,
+                else => |e| return e,
+            };
+            product *%= switch (arg) {
+                .int => |i| i,
+                else => |v| return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{.int}),
+                    .found = v,
+                } } },
+            };
+        }
+        return .{ .value = .{ .int = product } };
+    }
+    fn @"-"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        var cons = list orelse return .{ .eval_error = .not_enough_args };
+        var difference: i64 = switch (cons.car) {
+            .int => |i| i,
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.int}),
+                .found = v,
+            } } },
+        };
+        cons = switch (cons.cdr) {
+            // `(- a)` => -a, wrapping negation
+            .nil => return .{ .value = .{ .int = -%difference } },
+            .cons => |c| c.*,
+            else => |b| return .{ .eval_error = .{ .malformed_list = b } },
+        };
+        while (true) {
+            const arg = switch (try self.eval(cons.car)) {
+                .value => |v| v,
+                else => |e| return e,
+            };
+            difference -%= switch (arg) {
+                .int => |i| i,
+                else => |v| return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{.int}),
+                    .found = v,
+                } } },
+            };
+            cons = switch (cons.cdr.toListPartial()) {
+                .list => |meow| meow orelse break,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+        }
+        return .{ .value = .{ .int = difference } };
+    }
+    fn @"/"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        var cons = list orelse return .{ .eval_error = .not_enough_args };
+        var quotient: i64 = switch (cons.car) {
+            .int => |i| i,
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.int}),
+                .found = v,
+            } } },
+        };
+        cons = switch (cons.cdr) {
+            // We do not support the reciprocal function `(/ a)`, since it's not useful for integers
+            .nil => return .{ .eval_error = .not_enough_args },
+            .cons => |c| c.*,
+            else => |b| return .{ .eval_error = .{ .malformed_list = b } },
+        };
+        while (true) {
+            const arg = switch (try self.eval(cons.car)) {
+                .value => |v| switch (v) {
+                    .int => |i| i,
+                    else => |bad_type| return .{ .eval_error = .{ .expected_type = .{
+                        .expected = TypeMask.new(&.{.int}),
+                        .found = bad_type,
+                    } } },
+                },
+                else => |e| return e,
+            };
+            quotient = checkedWrappingDiv(quotient, arg) orelse
+                return .{ .eval_error = .division_by_zero };
+            cons = switch (cons.cdr.toListPartial()) {
+                .list => |meow| meow orelse break,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+        }
+        return .{ .value = .{ .int = quotient } };
+    }
+    // More code duplication! >:3
+    fn @"%"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        var cons = list orelse return .{ .eval_error = .not_enough_args };
+        var quotient: i64 = switch (cons.car) {
+            .int => |i| i,
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.int}),
+                .found = v,
+            } } },
+        };
+        cons = switch (cons.cdr) {
+            // We do not support the reciprocal function `(/ a)`, since it's not useful for integers
+            .nil => return .{ .eval_error = .not_enough_args },
+            .cons => |c| c.*,
+            else => |b| return .{ .eval_error = .{ .malformed_list = b } },
+        };
+        while (true) {
+            const arg = switch (try self.eval(cons.car)) {
+                .value => |v| switch (v) {
+                    .int => |i| i,
+                    else => |bad_type| return .{ .eval_error = .{ .expected_type = .{
+                        .expected = TypeMask.new(&.{.int}),
+                        .found = bad_type,
+                    } } },
+                },
+                else => |e| return e,
+            };
+            quotient = checkedWrappingMod(quotient, arg) orelse
+                return .{ .eval_error = .division_by_zero };
+            cons = switch (cons.cdr.toListPartial()) {
+                .list => |meow| meow orelse break,
+                .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
+            };
+        }
+        return .{ .value = .{ .int = quotient } };
+    }
     fn print(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(1, self, list)) {
             .args => |a| a,
@@ -522,6 +790,7 @@ pub const EvalError = union(enum) {
     expected_type: struct { expected: TypeMask, found: Value },
     extra_args: Value,
     not_enough_args,
+    division_by_zero,
     //sdl_error: []const u8,
     out_of_cint_range: i64,
     todo: []const u8,
@@ -558,6 +827,7 @@ pub const EvalError = union(enum) {
                 try writer.writeByte('`');
             },
             .not_enough_args => try writer.writeAll("not enough args"),
+            .division_by_zero => try writer.writeAll("division by zero"),
             .out_of_cint_range => |i| try writer.print(
                 "integer {} out of range (must be between 0 and {})",
                 .{ i, math.maxInt(c_int) },
