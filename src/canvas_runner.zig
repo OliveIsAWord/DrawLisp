@@ -10,6 +10,8 @@ pub const Message = union(enum) {
     create_window: struct { width: c_int, height: c_int },
     clear,
     pixel: struct { x: c_int, y: c_int },
+    line: struct { x1: c_int, y1: c_int, x2: c_int, y2: c_int },
+    rect: struct { x: c_int, y: c_int, w: c_int, h: c_int },
     destroy_window,
     kill,
 };
@@ -52,6 +54,8 @@ pub fn run(event_queue: *Queue(Message), error_queue: *Queue([]const u8)) void {
                     const y = coordinates.y;
                     pass_error(error_queue, canvas.pixel(x, y));
                 },
+                .line => |v| pass_error(error_queue, canvas.line(v.x1, v.y1, v.x2, v.y2)),
+                .rect => |v| pass_error(error_queue, canvas.rect(v.x, v.y, v.w, v.h)),
                 .destroy_window => canvas.destroyWindow(),
                 .kill => return,
             }

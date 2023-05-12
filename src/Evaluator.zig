@@ -752,6 +752,24 @@ const primitive_impls = struct {
         return .{ .value = .nil };
     }
 
+    fn line(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const v = switch (try getCintArgs(4, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        self.draw_queue.push(.{ .line = .{ .x1 = v[0], .y1 = v[1], .x2 = v[2], .y2 = v[3] } });
+        return .{ .value = .nil };
+    }
+
+    fn rect(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const v = switch (try getCintArgs(4, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        self.draw_queue.push(.{ .rect = .{ .x = v[0], .y = v[1], .w = v[2], .h = v[3] } });
+        return .{ .value = .nil };
+    }
+
     fn @"destroy-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
         if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
         self.draw_queue.push(.destroy_window);

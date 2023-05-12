@@ -63,6 +63,21 @@ pub fn pixel(self: Self, x: c_int, y: c_int) Result(void) {
     return .{ .ok = {} };
 }
 
+pub fn line(self: Self, x1: c_int, y1: c_int, x2: c_int, y2: c_int) Result(void) {
+    if (self.window) |window| {
+        if (c.SDL_RenderDrawLine(window.renderer, x1, y1, x2, y2) != 0) return .{ .err = getError() };
+    }
+    return .{ .ok = {} };
+}
+
+pub fn rect(self: Self, x: c_int, y: c_int, w: c_int, h: c_int) Result(void) {
+    if (self.window) |window| {
+        const sdl_rect = c.SDL_Rect{ .x = x, .y = y, .w = w, .h = h };
+        if (c.SDL_RenderFillRect(window.renderer, &sdl_rect) != 0) return .{ .err = getError() };
+    }
+    return .{ .ok = {} };
+}
+
 pub fn render(self: *Self) void {
     if (self.window) |window| c.SDL_RenderPresent(window.renderer);
 }
@@ -73,6 +88,7 @@ pub fn destroyWindow(self: *Self) void {
     c.SDL_DestroyRenderer(window.renderer);
     c.SDL_QuitSubSystem(c.SDL_INIT_VIDEO);
     c.SDL_Quit();
+    self.window = null;
 }
 
 pub fn deinit(self: *Self) void {
