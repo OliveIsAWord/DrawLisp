@@ -37,7 +37,7 @@ pub fn main() !void {
     var symbol_table = SymbolTable.init(alloc, alloc);
     defer symbol_table.deinit();
     var gc = Gc.init(alloc, alloc);
-    defer gc.deinit();
+    defer gc.deinitAndSweep();
     var evaluator: Evaluator = try Evaluator.init(alloc, &gc, &symbol_table, stdout);
     defer evaluator.deinit();
     {
@@ -58,7 +58,14 @@ pub fn main() !void {
     var skip_prompt = false;
     while (true) {
         defer evaluator.flushDrawErrorQueue();
-        defer gc.sweep();
+        defer {
+            for (evaluator.map.items) |variable| {
+                gc.mark(variable.value) catch {
+                    std.debug.print("Ran out of memory during garbage collection.", .{});
+                    break;
+                };
+            } else gc.sweep();
+        }
         if (!skip_prompt and buffer.outstanding_parens == 0) {
             try stdout.writeAll("> ");
             try stdout_bw.flush();
@@ -95,7 +102,6 @@ pub fn main() !void {
         );
         try eval_output.println(stdout, symbol_table);
         try stdout_bw.flush();
-        for (evaluator.map.items) |variable| try gc.mark(variable.value);
     }
 }
 
