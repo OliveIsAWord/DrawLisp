@@ -29,12 +29,11 @@ const Self = @This();
 
 pub fn createWindow(self: *Self, width: c_int, height: c_int) Result(void) {
     if (c.SDL_InitSubSystem(c.SDL_INIT_VIDEO) != 0) return .{ .err = getError() };
-    const error_or_void = self.getNewWindow(width, height).map(void, kCombinator(Window, {}));
-    switch (self.clear()) {
+    switch (self.getNewWindow(width, height)) {
         .ok => {},
-        else => |e| return e,
+        .err => |e| return .{ .err = e },
     }
-    return error_or_void;
+    return self.clear();
 }
 
 pub fn hasWindow(self: Self) bool {
@@ -94,14 +93,6 @@ pub fn destroyWindow(self: *Self) void {
 pub fn deinit(self: *Self) void {
     self.destroyWindow();
     self.* = undefined;
-}
-
-fn kCombinator(comptime T: type, x: anytype) fn (T) @TypeOf(x) {
-    return struct {
-        fn f(_: T) @TypeOf(x) {
-            return x;
-        }
-    }.f;
 }
 
 fn unreachableFn(_: anytype) noreturn {

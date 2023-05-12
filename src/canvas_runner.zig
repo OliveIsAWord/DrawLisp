@@ -9,6 +9,7 @@ const c = Canvas.c;
 pub const Message = union(enum) {
     create_window: struct { width: c_int, height: c_int },
     clear,
+    draw,
     pixel: struct { x: c_int, y: c_int },
     line: struct { x1: c_int, y1: c_int, x2: c_int, y2: c_int },
     rect: struct { x: c_int, y: c_int, w: c_int, h: c_int },
@@ -48,6 +49,7 @@ pub fn run(event_queue: *Queue(Message), error_queue: *Queue([]const u8)) void {
                     const height = dimensions.height;
                     pass_error(error_queue, canvas.createWindow(width, height));
                 },
+                .draw => canvas.render(),
                 .clear => pass_error(error_queue, canvas.clear()),
                 .pixel => |coordinates| {
                     const x = coordinates.x;

@@ -81,6 +81,13 @@ fn GetCintArgsOutput(comptime num_args: comptime_int) type {
     };
 }
 
+fn GetVarArgsOutput(comptime num_args: comptime_int) type {
+    return union(enum) {
+        args: struct { first: [num_args]Value, len: usize },
+        eval_error: EvalError,
+    };
+}
+
 fn GetArgsPartialOutput(comptime num_args: comptime_int) type {
     return union(enum) {
         args: struct { first: [num_args]Value, rest: ?Value.Cons },
@@ -131,6 +138,26 @@ fn getArgs(
     }
     return .{ .args = args };
 }
+
+// fn getVarArgsNoEval(
+//     comptime min_args: comptime_int,
+//     comptime max_args: comptime_int,
+//     self: *Self,
+//     list_: ?Value.Cons,
+// ) !GetVarArgsOutput(max_args) {
+//     comptime std.debug.assert(min_args <= max_args);
+//     var list = list_;
+//     var args: [max_args]Value = undefined;
+//     for (args) |*arg| {
+//         const cons = list orelse return .{ .eval_error = .not_enough_args };
+//         arg.* = cons.car;
+//         list = switch (cons.cdr.toListPartial()) {
+//             .list => |c| c,
+//             .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
+//         };
+//     }
+//     return .{ .args = .{ .first = args, .rest = list } };
+// }
 
 fn getCintArgs(
     comptime num_args: comptime_int,
@@ -393,6 +420,20 @@ const primitive_impls = struct {
         }
         return .{ .value = accumulator };
     }
+    // fn range(self: *Self, list_: ?Value.Cons) !EvalOutput {
+    //     const list = list_ orelse return .{ .eval_error = .not_enough_args };
+    //     const parameters = blk: {
+    //         const buffer: [3]i64 = undefined;
+    //         const len: usize = undefined;
+    //     };
+    //     var out_list = .nil;
+    //     var i = parameters.end;
+    //     while (i >= parameters.start) {
+    //         i = math.sub(i64, i, parameters.step) catch break;
+    //         out_list = .{ .cons = try self.gc.create_cons(.{ .car = i, .cdr = out_list })};
+    //     }
+    //     return out_list;
+    // }
     fn cond(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var list = list_;
         while (list) |cons| {
@@ -732,6 +773,12 @@ const primitive_impls = struct {
         const width = dimensions[0];
         const height = dimensions[1];
         self.draw_queue.push(.{ .create_window = .{ .width = width, .height = height } });
+        return .{ .value = .nil };
+    }
+
+    fn draw(self: *Self, list: ?Value.Cons) !EvalOutput {
+        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        self.draw_queue.push(.draw);
         return .{ .value = .nil };
     }
 
