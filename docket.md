@@ -11,9 +11,13 @@
 - `set-car!` and `set-cdr!`
 - `while`
 - Random number generation
+- Stack trace on error
 
-# Image Processing
-- Change Draw Color
+# Image processing
+- Transparency
+- Change stroke width?
+- Translation, rotation, scaling?
+- Save and load images
 - Resize window
 - Change window position
 
@@ -23,3 +27,10 @@
 - Pass `?*Value.Cons` to primitive impls (fixes todos like `getArgsNoEval`)
 - Code deduplication on primitive impls, particularly arithmetic and draw ops
 - Type reflection to automatically generate `canvas_runner.Message` type and implementations
+- Refactor `Evaluator.lexical_settings` to avoid code duplication and code bloat
+
+# Outside the code
+- Documentation of semantics, primitives, stdlib
+- Screenshots
+- Example programs
+- Icon

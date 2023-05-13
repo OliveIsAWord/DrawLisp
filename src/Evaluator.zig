@@ -84,7 +84,7 @@ fn GetCintArgsOutput(comptime num_args: comptime_int) type {
 
 fn GetVarArgsOutput(comptime num_args: comptime_int) type {
     return union(enum) {
-        args: struct { first: [num_args]Value, len: usize },
+        args: struct { buffer: [num_args]Value, len: usize },
         eval_error: EvalError,
     };
 }
@@ -140,25 +140,46 @@ fn getArgs(
     return .{ .args = args };
 }
 
-// fn getVarArgsNoEval(
-//     comptime min_args: comptime_int,
-//     comptime max_args: comptime_int,
-//     self: *Self,
-//     list_: ?Value.Cons,
-// ) !GetVarArgsOutput(max_args) {
-//     comptime std.debug.assert(min_args <= max_args);
-//     var list = list_;
-//     var args: [max_args]Value = undefined;
-//     for (args) |*arg| {
-//         const cons = list orelse return .{ .eval_error = .not_enough_args };
-//         arg.* = cons.car;
-//         list = switch (cons.cdr.toListPartial()) {
-//             .list => |c| c,
-//             .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
-//         };
-//     }
-//     return .{ .args = .{ .first = args, .rest = list } };
-// }
+fn getVarArgsNoEval(
+    comptime min_args: comptime_int,
+    comptime max_args: comptime_int,
+    list_: ?Value.Cons,
+) GetVarArgsOutput(max_args) {
+    comptime std.debug.assert(min_args <= max_args);
+    var list = list_;
+    var args: [max_args]Value = undefined;
+    var len: usize = 0;
+    for (args) |*arg| {
+        const cons = list orelse break;
+        arg.* = cons.car;
+        list = switch (cons.cdr.toListPartial()) {
+            .list => |c| c,
+            .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
+        };
+        len += 1;
+    }
+    if (len < min_args) return .{ .eval_error = .not_enough_args };
+    return .{ .args = .{ .buffer = args, .len = len } };
+}
+
+fn getVarArgs(
+    comptime min_args: comptime_int,
+    comptime max_args: comptime_int,
+    self: *Self,
+    list: ?Value.Cons,
+) !GetVarArgsOutput(max_args) {
+    var out = switch (getVarArgsNoEval(min_args, max_args, list)) {
+        .args => |a| a,
+        .eval_error => |e| return .{ .eval_error = e },
+    };
+    for (out.buffer[0..out.len]) |*arg| {
+        switch (try self.eval(arg.*)) {
+            .value => |v| arg.* = v,
+            .eval_error => |e| return .{ .eval_error = e },
+        }
+    }
+    return .{ .args = out };
+}
 
 fn getCintArgs(
     comptime num_args: comptime_int,
@@ -439,20 +460,57 @@ const primitive_impls = struct {
         }
         return .{ .value = accumulator };
     }
-    // fn range(self: *Self, list_: ?Value.Cons) !EvalOutput {
-    //     const list = list_ orelse return .{ .eval_error = .not_enough_args };
-    //     const parameters = blk: {
-    //         const buffer: [3]i64 = undefined;
-    //         const len: usize = undefined;
-    //     };
-    //     var out_list = .nil;
-    //     var i = parameters.end;
-    //     while (i >= parameters.start) {
-    //         i = math.sub(i64, i, parameters.step) catch break;
-    //         out_list = .{ .cons = try self.gc.create_cons(.{ .car = i, .cdr = out_list })};
-    //     }
-    //     return out_list;
-    // }
+    fn range(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const Parameters = struct { start: i64, end: i64, step: i64 };
+        const parameters: Parameters = blk: {
+            var buffer: [3]i64 = undefined;
+            var len: usize = undefined;
+            switch (try getVarArgs(1, 3, self, list)) {
+                .args => |out| {
+                    len = out.len;
+                    for (out.buffer[0..len]) |v, i| switch (v) {
+                        .int => |n| buffer[i] = n,
+                        else => return .{ .eval_error = .{ .expected_type = .{
+                            .expected = TypeMask.new(&.{.int}),
+                            .found = v,
+                        } } },
+                    };
+                },
+                .eval_error => |e| return .{ .eval_error = e },
+            }
+            break :blk switch (len) {
+                1 => if (buffer[0] < 0) .{
+                    .start = buffer[0],
+                    .end = 0,
+                    .step = 1,
+                } else .{
+                    .start = 0,
+                    .end = buffer[0],
+                    .step = 1,
+                },
+                2 => .{
+                    .start = buffer[0],
+                    .end = buffer[1],
+                    .step = math.sign(buffer[1] -| buffer[0]),
+                },
+                3 => .{ .start = buffer[0], .end = buffer[1], .step = buffer[2] },
+                else => unreachable,
+            };
+        };
+        var out_list: Value = .nil;
+        if (parameters.start != parameters.end) {
+            const s = math.sign(parameters.step);
+            if (s == 0) return .{ .eval_error = .division_by_zero };
+            var i = parameters.end;
+            while (true) {
+                i = math.sub(i64, i, parameters.step) catch break;
+                if (math.sign(i +| s -| parameters.start) != s) break;
+                const new_link = .{ .car = .{ .int = i }, .cdr = out_list };
+                out_list = .{ .cons = try self.gc.create_cons(new_link) };
+            }
+        }
+        return .{ .value = out_list };
+    }
     fn cond(self: *Self, list_: ?Value.Cons) !EvalOutput {
         var list = list_;
         while (list) |cons| {
@@ -681,12 +739,15 @@ const primitive_impls = struct {
     }
     fn @"-"(self: *Self, list: ?Value.Cons) !EvalOutput {
         var cons = list orelse return .{ .eval_error = .not_enough_args };
-        var difference: i64 = switch (cons.car) {
-            .int => |i| i,
-            else => |v| return .{ .eval_error = .{ .expected_type = .{
-                .expected = TypeMask.new(&.{.int}),
-                .found = v,
-            } } },
+        var difference: i64 = switch (try self.eval(cons.car)) {
+            .value => |v| switch (v) {
+                .int => |i| i,
+                else => |bad| return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{.int}),
+                    .found = bad,
+                } } },
+            },
+            else => |e| return e,
         };
         cons = switch (cons.cdr) {
             // `(- a)` => -a, wrapping negation
@@ -715,12 +776,15 @@ const primitive_impls = struct {
     }
     fn @"/"(self: *Self, list: ?Value.Cons) !EvalOutput {
         var cons = list orelse return .{ .eval_error = .not_enough_args };
-        var quotient: i64 = switch (cons.car) {
-            .int => |i| i,
-            else => |v| return .{ .eval_error = .{ .expected_type = .{
-                .expected = TypeMask.new(&.{.int}),
-                .found = v,
-            } } },
+        var quotient: i64 = switch (try self.eval(cons.car)) {
+            .value => |v| switch (v) {
+                .int => |i| i,
+                else => |bad| return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{.int}),
+                    .found = bad,
+                } } },
+            },
+            else => |e| return e,
         };
         cons = switch (cons.cdr) {
             // We do not support the reciprocal function `(/ a)`, since it's not useful for integers
@@ -751,12 +815,15 @@ const primitive_impls = struct {
     // More code duplication! >:3
     fn @"%"(self: *Self, list: ?Value.Cons) !EvalOutput {
         var cons = list orelse return .{ .eval_error = .not_enough_args };
-        var quotient: i64 = switch (cons.car) {
-            .int => |i| i,
-            else => |v| return .{ .eval_error = .{ .expected_type = .{
-                .expected = TypeMask.new(&.{.int}),
-                .found = v,
-            } } },
+        var quotient: i64 = switch (try self.eval(cons.car)) {
+            .value => |v| switch (v) {
+                .int => |i| i,
+                else => |bad| return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{.int}),
+                    .found = bad,
+                } } },
+            },
+            else => |e| return e,
         };
         cons = switch (cons.cdr) {
             // We do not support the reciprocal function `(/ a)`, since it's not useful for integers
