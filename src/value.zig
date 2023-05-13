@@ -4,11 +4,13 @@ const Allocator = std.mem.Allocator;
 const SymbolTable = @import("SymbolTable.zig");
 const Evaluator = @import("Evaluator.zig");
 const RuntimeWriter = @import("RuntimeWriter.zig");
+const Color = @import("Color.zig");
 
 const pretty_print_lists = true;
 const pretty_print_symbols = true;
 const quote_before_symbols = false;
 
+// TODO: Can we use @TypeInfo(Value) or some existing Zig function to autogenerate this?
 pub const Type = enum {
     nil,
     cons,
@@ -17,6 +19,7 @@ pub const Type = enum {
     symbol,
     primitive_function,
     lambda,
+    color,
 };
 
 pub const Value = union(Type) {
@@ -44,6 +47,7 @@ pub const Value = union(Type) {
     symbol: i32,
     primitive_function: Evaluator.PrimitiveImpl,
     lambda: *Lambda,
+    color: Color,
 
     pub fn toListPartial(self: Self) union(enum) { list: ?Cons, bad: Value } {
         const list = switch (self) {
@@ -115,6 +119,11 @@ pub const Value = union(Type) {
                 }
                 try writer.writeAll(": ");
                 try lambda.body.format_internal(writer, false, maybe_symbols);
+                try writer.writeAll(">");
+            },
+            .color => |color| {
+                try writer.print("<color #{x:0>2}{x:0>2}{x:0>2}", .{ color.r, color.g, color.b });
+                if (color.a < 255) try writer.print("{x:0>2}", .{color.a});
                 try writer.writeAll(">");
             },
         }

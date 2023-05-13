@@ -4,6 +4,8 @@ pub const c = @cImport({
     @cInclude("SDL.h");
 });
 
+const Color = @import("Color.zig");
+
 pub fn Result(comptime T: type) type {
     return union(enum) {
         ok: T,
@@ -15,6 +17,10 @@ pub fn Result(comptime T: type) type {
                 .err => |e| .{ .err = e },
             };
         }
+
+        pub fn as_err(self: @This()) ?[]const u8 {
+            return if (self == .err) self.err else null;
+        }
     };
 }
 
@@ -24,6 +30,9 @@ const Window = struct {
 };
 
 window: ?Window = null,
+clear_color: Color = Color.magenta,
+fill_color: Color = Color.magenta,
+stroke_color: Color = Color.magenta,
 
 const Self = @This();
 
@@ -40,23 +49,19 @@ pub fn hasWindow(self: Self) bool {
     return self.window != null;
 }
 
-pub fn clear(self: *Self) Result(void) {
+pub fn clear(self: Self) Result(void) {
     if (self.window) |window| {
-        switch (self.setColor(255, 255, 255)) {
-            .ok => {},
-            else => |e| return e,
-        }
+        const e = self.setColor(self.clear_color);
+        if (e == .err) return e;
         if (c.SDL_RenderClear(window.renderer) != 0) return .{ .err = getError() };
-        switch (self.setColor(0, 0, 0)) {
-            .ok => {},
-            else => |e| return e,
-        }
     }
     return .{ .ok = {} };
 }
 
-pub fn pixel(self: Self, x: c_int, y: c_int) Result(void) {
+pub fn point(self: Self, x: c_int, y: c_int) Result(void) {
     if (self.window) |window| {
+        const e = self.setColor(self.stroke_color);
+        if (e == .err) return e;
         if (c.SDL_RenderDrawPoint(window.renderer, x, y) != 0) return .{ .err = getError() };
     }
     return .{ .ok = {} };
@@ -64,6 +69,8 @@ pub fn pixel(self: Self, x: c_int, y: c_int) Result(void) {
 
 pub fn line(self: Self, x1: c_int, y1: c_int, x2: c_int, y2: c_int) Result(void) {
     if (self.window) |window| {
+        const e = self.setColor(self.stroke_color);
+        if (e == .err) return e;
         if (c.SDL_RenderDrawLine(window.renderer, x1, y1, x2, y2) != 0) return .{ .err = getError() };
     }
     return .{ .ok = {} };
@@ -72,12 +79,21 @@ pub fn line(self: Self, x1: c_int, y1: c_int, x2: c_int, y2: c_int) Result(void)
 pub fn rect(self: Self, x: c_int, y: c_int, w: c_int, h: c_int) Result(void) {
     if (self.window) |window| {
         const sdl_rect = c.SDL_Rect{ .x = x, .y = y, .w = w, .h = h };
+        {
+            const e = self.setColor(self.fill_color);
+            if (e == .err) return e;
+        }
         if (c.SDL_RenderFillRect(window.renderer, &sdl_rect) != 0) return .{ .err = getError() };
+        {
+            const e = self.setColor(self.stroke_color);
+            if (e == .err) return e;
+        }
+        if (c.SDL_RenderDrawRect(window.renderer, &sdl_rect) != 0) return .{ .err = getError() };
     }
     return .{ .ok = {} };
 }
 
-pub fn render(self: *Self) void {
+pub fn render(self: Self) void {
     if (self.window) |window| c.SDL_RenderPresent(window.renderer);
 }
 
@@ -110,7 +126,7 @@ fn getWindowOrDefault(self: *Self) Result(Window) {
 fn getNewWindow(self: *Self, width: c_int, height: c_int) Result(Window) {
     if (self.hasWindow()) self.destroyWindow();
     var window_handle = c.SDL_CreateWindow(
-        "meow lisp :3",
+        "DrawLisp Canvas",
         c.SDL_WINDOWPOS_UNDEFINED,
         c.SDL_WINDOWPOS_UNDEFINED,
         width,
@@ -126,10 +142,9 @@ fn getNewWindow(self: *Self, width: c_int, height: c_int) Result(Window) {
     return .{ .ok = window };
 }
 
-fn setColor(self: *Self, r: u8, g: u8, b: u8) Result(void) {
+fn setColor(self: Self, color: Color) Result(void) {
     if (self.window) |window|
-        if (c.SDL_SetRenderDrawColor(window.renderer, r, g, b, 255) != 0)
+        if (c.SDL_SetRenderDrawColor(window.renderer, color.r, color.g, color.b, color.a) != 0)
             return .{ .err = getError() };
-
     return .{ .ok = {} };
 }

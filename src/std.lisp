@@ -16,3 +16,10 @@
 
 ; (let compose (lambda (f g) (lambda x (f (g x)))))
 (let reduce (lambda (op list) (fold op (car list) (cdr list))))
+
+(let white (color 255 255 255))
+(let black (color 0 0 0))
+
+(let :clear-color white)
+(let :fill-color white)
+(let :stroke-color black)

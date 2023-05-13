@@ -3,9 +3,14 @@
 - Use hash maps for variable lookup?
 - Tail call optimization
 - Recursion limit
+- Define functions with `let`
 - Typeof
 - Pretty print parse errors
 - Floats, or some other non-integral numeric type
+- `eval` and `apply`
+- `set-car!` and `set-cdr!`
+- `while`
+- Random number generation
 
 # Image Processing
 - Change Draw Color

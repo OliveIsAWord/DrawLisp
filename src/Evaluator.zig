@@ -15,6 +15,7 @@ const RuntimeWriter = @import("RuntimeWriter.zig");
 const canvas_runner = @import("canvas_runner.zig");
 const CanvasMessage = canvas_runner.Message;
 const Queue = @import("mpmc_queue.zig").MPMCQueueUnmanaged;
+const Color = @import("Color.zig");
 
 map: Map,
 gc: *Gc,
@@ -40,7 +41,7 @@ fn MaskFromEnum(comptime T: type) type {
             }
             break :blk fields;
         };
-        const BackingInt = std.meta.Int(.unsigned, len);
+        const BackingInt = std.meta.Int(.unsigned, len + 1);
         const WidthInt = std.math.Log2Int(BackingInt);
 
         fn new(types: []const T) @This() {
@@ -230,6 +231,23 @@ fn cast_cint(int: anytype) ?c_int {
     return if (i >= 0) i else null;
 }
 
+fn saturatingCast(comptime Int: type, value: anytype) Int {
+    const min = math.minInt(Int);
+    const max = math.maxInt(Int);
+    return if (value < min)
+        min
+    else if (value > max)
+        max
+    else
+        @intCast(Int, value);
+}
+
+const lexical_settings = .{
+    .{ ":clear-color", "set_clear_color" },
+    .{ ":fill-color", "set_fill_color" },
+    .{ ":stroke-color", "set_stroke_color" },
+};
+
 const primitive_impls = struct {
     fn quote(_: *Self, list_: ?Value.Cons) !EvalOutput {
         const cons = list_ orelse return .{ .value = .nil };
@@ -239,7 +257,7 @@ const primitive_impls = struct {
         }
         return .{ .value = cons.car };
     }
-    const @"atom?" = is_type(.{ .nil, .int, .bool, .symbol, .primitive_function, .lambda });
+    const @"atom?" = is_type(.{ .nil, .int, .bool, .symbol, .primitive_function, .lambda, .color });
     const @"nil?" = is_type(.{.nil});
     const @"cons?" = is_type(.{.cons});
     const @"int?" = is_type(.{.int});
@@ -248,6 +266,7 @@ const primitive_impls = struct {
     const @"primitive?" = is_type(.{.primitive_function});
     const @"lambda?" = is_type(.{.lambda});
     const @"function?" = is_type(.{ .primitive_function, .lambda });
+    const @"color?" = is_type(.{.color});
     fn @"eq?"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
             .args => |a| a,
@@ -490,7 +509,7 @@ const primitive_impls = struct {
     }
     fn begin(self: *Self, list_: ?Value.Cons) !EvalOutput {
         const old_len = self.map.items.len;
-        defer self.map.shrinkRetainingCapacity(old_len);
+        defer self.destroyScope(old_len);
         var list = list_;
         var yielded_value: Value = .nil;
         while (list) |cons| {
@@ -547,7 +566,7 @@ const primitive_impls = struct {
         // should we keep track of a set of symbols not to bind?
         while (self.visit_stack.popOrNull()) |visit| {
             switch (visit) {
-                .nil, .int, .bool, .primitive_function => {},
+                .nil, .int, .bool, .primitive_function, .color => {},
                 .symbol => |symbol| if (self.getVar(symbol)) |current_value| {
                     try binds.append(.{ .symbol = symbol, .value = current_value });
                 },
@@ -592,6 +611,19 @@ const primitive_impls = struct {
                     .value => |v| v,
                     else => |e| return e,
                 };
+                inline for (lexical_settings) |setting| {
+                    if (self.symbol_table.getOrNull(setting[0]) == symbol) {
+                        if (init_value != .color) return .{ .eval_error = .{ .expected_type = .{
+                            .expected = TypeMask.new(&.{.color}),
+                            .found = init_value,
+                        } } };
+                        var message = @unionInit(CanvasMessage, setting[1], init_value.color);
+                        self.draw_queue.push(message);
+                        break;
+                    }
+                } else if (self.symbol_table.getByIndex(symbol)[0] == ':') {
+                    return .{ .eval_error = .{ .unknown_lexical_setting = symbol } };
+                }
                 try self.map.append(.{ .symbol = symbol, .value = init_value });
                 return .{ .value = init_value };
             },
@@ -765,6 +797,25 @@ const primitive_impls = struct {
     const @"set-car!" = todo;
     const @"set-cdr!" = todo;
 
+    fn color(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(3, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        var ints: [3]u8 = undefined;
+        for (args) |a, i| {
+            switch (a) {
+                .int => |v| ints[i] = saturatingCast(u8, v),
+                else => return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{.int}),
+                    .found = a,
+                } } },
+            }
+        }
+        const meow_color = .{ .r = ints[0], .g = ints[1], .b = ints[2] };
+        return .{ .value = .{ .color = meow_color } };
+    }
+
     fn @"create-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const dimensions: [2]c_int = if (list == null) .{ 500, 500 } else switch (try getCintArgs(2, self, list)) {
             .args => |a| a,
@@ -788,14 +839,14 @@ const primitive_impls = struct {
         return .{ .value = .nil };
     }
 
-    fn pixel(self: *Self, list: ?Value.Cons) !EvalOutput {
+    fn point(self: *Self, list: ?Value.Cons) !EvalOutput {
         const coordinates = switch (try getCintArgs(2, self, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
         };
         const x = coordinates[0];
         const y = coordinates[1];
-        self.draw_queue.push(.{ .pixel = .{ .x = x, .y = y } });
+        self.draw_queue.push(.{ .point = .{ .x = x, .y = y } });
         return .{ .value = .nil };
     }
 
@@ -856,6 +907,7 @@ pub const EvalError = union(enum) {
     extra_args: Value,
     not_enough_args,
     division_by_zero,
+    unknown_lexical_setting: i32,
     //sdl_error: []const u8,
     out_of_cint_range: i64,
     todo: []const u8,
@@ -893,6 +945,10 @@ pub const EvalError = union(enum) {
             },
             .not_enough_args => try writer.writeAll("not enough args"),
             .division_by_zero => try writer.writeAll("division by zero"),
+            .unknown_lexical_setting => |s| writer.print(
+                "unknown lexical setting `{s}`",
+                .{symbols.getByIndex(s)},
+            ),
             .out_of_cint_range => |i| try writer.print(
                 "integer {} out of range (must be between 0 and {})",
                 .{ i, math.maxInt(c_int) },
@@ -976,6 +1032,28 @@ fn getVar(self: Self, symbol: i32) ?Value {
         if (entry.symbol == symbol) return entry.value;
     }
     return null;
+}
+
+fn destroyScope(self: *Self, old_len: usize) void {
+    inline for (lexical_settings) |setting| {
+        const symbol = self.symbol_table.getOrNull(setting[0]);
+        for (self.map.items[old_len..]) |binding| {
+            if (binding.symbol == symbol) {
+                var i = old_len;
+                while (i > 0) {
+                    i -= 1;
+                    const old_variable = self.map.items[i];
+                    if (old_variable.symbol == symbol) {
+                        var message = @unionInit(CanvasMessage, setting[1], old_variable.value.color);
+                        self.draw_queue.push(message);
+                        break;
+                    }
+                } else std.debug.panic("could not find previous value of {s}", .{setting[0]});
+                break;
+            }
+        }
+    }
+    self.map.shrinkRetainingCapacity(old_len);
 }
 
 fn print_value(self: Self, value: Value) anyerror!void {
@@ -1088,7 +1166,7 @@ pub fn flushDrawErrorQueue(self: *Self) void {
 pub fn eval(self: *Self, value: Value) !EvalOutput {
     self.flushDrawErrorQueue();
     switch (value) {
-        .nil, .bool, .int, .primitive_function, .lambda => return .{ .value = value },
+        .nil, .bool, .int, .primitive_function, .lambda, .color => return .{ .value = value },
         .symbol => |s| if (self.getVar(s)) |v| return .{ .value = v } else {
             return .{ .eval_error = .{ .variable_not_found = s } };
         },
@@ -1106,7 +1184,7 @@ pub fn eval(self: *Self, value: Value) !EvalOutput {
                 },
                 .lambda => |lambda| {
                     const old_len = self.map.items.len;
-                    defer self.map.shrinkRetainingCapacity(old_len);
+                    defer self.destroyScope(old_len);
                     try self.map.ensureUnusedCapacity(lambda.binds.len + lambda.args.items.len);
                     self.map.appendSliceAssumeCapacity(lambda.binds);
                     var arg_list: Value = pair.cdr;

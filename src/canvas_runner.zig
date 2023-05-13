@@ -5,12 +5,16 @@ const Queue = @import("mpmc_queue.zig").MPMCQueueUnmanaged;
 const Canvas = @import("Canvas.zig");
 pub const Result = Canvas.Result;
 const c = Canvas.c;
+const Color = @import("Color.zig");
 
 pub const Message = union(enum) {
     create_window: struct { width: c_int, height: c_int },
+    set_clear_color: Color,
+    set_fill_color: Color,
+    set_stroke_color: Color,
     clear,
     draw,
-    pixel: struct { x: c_int, y: c_int },
+    point: struct { x: c_int, y: c_int },
     line: struct { x1: c_int, y1: c_int, x2: c_int, y2: c_int },
     rect: struct { x: c_int, y: c_int, w: c_int, h: c_int },
     destroy_window,
@@ -49,12 +53,15 @@ pub fn run(event_queue: *Queue(Message), error_queue: *Queue([]const u8)) void {
                     const height = dimensions.height;
                     pass_error(error_queue, canvas.createWindow(width, height));
                 },
+                .set_clear_color => |color| canvas.clear_color = color,
+                .set_fill_color => |color| canvas.fill_color = color,
+                .set_stroke_color => |color| canvas.stroke_color = color,
                 .draw => canvas.render(),
                 .clear => pass_error(error_queue, canvas.clear()),
-                .pixel => |coordinates| {
+                .point => |coordinates| {
                     const x = coordinates.x;
                     const y = coordinates.y;
-                    pass_error(error_queue, canvas.pixel(x, y));
+                    pass_error(error_queue, canvas.point(x, y));
                 },
                 .line => |v| pass_error(error_queue, canvas.line(v.x1, v.y1, v.x2, v.y2)),
                 .rect => |v| pass_error(error_queue, canvas.rect(v.x, v.y, v.w, v.h)),
