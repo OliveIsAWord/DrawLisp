@@ -16,7 +16,8 @@ pub fn build(b: *std.build.Builder) void {
     exe.setBuildMode(mode);
     exe.install();
 
-    const sdl_path = "D:\\dev\\SDL2\\";
+    const path_raw = @embedFile("sdl_path.txt");
+    const sdl_path = comptime std.mem.trim(u8, path_raw, &std.ascii.whitespace) ++ "\\";
     exe.addIncludePath(sdl_path ++ "include");
     exe.addLibraryPath(sdl_path ++ "lib\\x64");
     b.installBinFile(sdl_path ++ "lib\\x64\\SDL2.dll", "SDL2.dll");
