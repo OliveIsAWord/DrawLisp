@@ -20,7 +20,7 @@ A programming language and environment focused on drawing to a digital canvas, s
 
 ## Building from source
 
-Provide a filepath to SDL in a file `sdl_filepath.txt`.
+Provide a filepath to SDL in a file `sdl_path.txt`.
 ```
 zig build run
 ```
