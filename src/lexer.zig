@@ -41,8 +41,10 @@ fn eat_whitespace(src_: []const u8) []const u8 {
     while (true) {
         while (src.len > 0 and is_whitespace(src[0])) src = src[1..];
         if (src.len > 0 and src[0] == ';') {
-            while (src.len > 0 and src[0] != '\n') src = src[1..];
-        } else return src;
+            while (src.len > 0 and src[0] != '\n' and src[0] != '\r') src = src[1..];
+            continue;
+        }
+        return src;
     }
 }
 
