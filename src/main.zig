@@ -33,6 +33,9 @@ pub fn main() !void {
     var stderr_bw = std.io.bufferedWriter(stderr_file);
     defer stderr_bw.flush() catch {};
     const stderr = RuntimeWriter.fromBufferedWriter(&stderr_bw);
+    
+    try stdout.writeAll("DrawLisp v0.0.1\n");
+    try stdout_bw.flush();
 
     var symbol_table = SymbolTable.init(alloc, alloc);
     defer symbol_table.deinit();

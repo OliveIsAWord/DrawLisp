@@ -21,6 +21,8 @@ DrawLisp is a dialect of the [Lisp](https://en.wikipedia.org/wiki/Lisp_(programm
 
 The expression `(f arg1 arg2 arg3 [etc.])` calls the function `f` with the given arguments.
 
+You can exit the interactive shell by entering `;`.
+
 # Lexical settings
 
 Lexical settings are perhaps the most novel concept implemented in this project. They are certain variable names (currently `:fill-color`, `:stroke-color`, and `:clear-color`) are read by the evaluator to determine how to draw a given shape. Importantly, these definitions are forgotten at the end of the block of code in which they are defined. Consider the following example:
