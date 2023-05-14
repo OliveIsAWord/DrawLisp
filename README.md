@@ -5,4 +5,4 @@
 <img src="icon_large_transparent.png" alt="DrawLisp logo" align="right" width="256"/>
 
 # DrawLisp
-A programming language and environment focused on drawing to a digital canvas, similar to [Processing](https://processing.org/) and [p5.js](https://p5js.org/).
+A programming language and environment focused on drawing to a digital canvas, similar to [Processing](https://processing.org/) and [p5.js](https://p5js.org/). Users primarily interact with DrawLisp through an interactive shell (a.k.a. a REPL). The language is a Lisp dialect inspired by Scheme.
