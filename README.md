@@ -1,4 +1,4 @@
-<a href="https://oliveisaword.itch.io/drawlisp?secret=YvWD7OeAYr5Go241rtOMFrdbRG8">
+<a href="https://oliveisaword.itch.io/drawlisp">
     <img src="https://static.itch.io/images/badge-color.svg" alt="Available on itch.io" width=200/>
 </a>
 
