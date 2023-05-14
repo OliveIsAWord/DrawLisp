@@ -4,7 +4,7 @@
 - Tail call optimization
 - Recursion limit
 - Define functions with `let`
-- Typeof
+- `typeof`
 - Pretty print parse errors
 - Floats, or some other non-integral numeric type
 - `eval` and `apply`
@@ -30,7 +30,6 @@
 - Refactor `Evaluator.lexical_settings` to avoid code duplication and code bloat
 
 # Outside the code
-- Documentation of semantics, primitives, stdlib
+- Documentation
 - Screenshots
 - Example programs
-- Icon
