@@ -1,5 +1,6 @@
 const std = @import("std");
-const sleep_nanoseconds = std.time.sleep;
+const time = std.time;
+const sleep_nanoseconds = time.sleep;
 
 const Queue = @import("mpmc_queue.zig").MPMCQueueUnmanaged;
 const Canvas = @import("Canvas.zig");
@@ -70,5 +71,6 @@ pub fn run(event_queue: *Queue(Message), error_queue: *Queue([]const u8)) void {
             }
         }
         canvas.render();
+        //sleep_nanoseconds(time.ns_per_s / 60);
     }
 }

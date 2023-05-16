@@ -135,7 +135,14 @@ fn getNewWindow(self: *Self, width: c_int, height: c_int) Result(Window) {
     ) orelse return .{ .err = getError() };
     var is_error = true;
     defer if (is_error) c.SDL_DestroyWindow(window_handle);
-    var renderer = c.SDL_CreateRenderer(window_handle, -1, 0) orelse return .{ .err = getError() };
+    var renderer = c.SDL_CreateRenderer(
+        window_handle,
+        -1,
+        c.SDL_RENDERER_PRESENTVSYNC,
+    ) orelse return .{ .err = getError() };
+    defer if (is_error) c.SDL_DestroyRenderer(renderer);
+    if (c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND) != 0)
+        return .{ .err = getError() };
     const window = .{ .window_handle = window_handle, .renderer = renderer };
     self.window = window;
     is_error = false;
