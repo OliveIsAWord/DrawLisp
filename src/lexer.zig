@@ -75,18 +75,13 @@ pub const LexError = union(enum) {
     const Self = @This();
     generic,
     unexpected_eof,
-    invalid_boolean_literal: u8,
 
     pub fn print(self: Self, writer: anytype) !void {
-        const static_str = switch (self) {
+        const str = switch (self) {
             .generic => "unknown",
             .unexpected_eof => "unexpected eof",
-            .invalid_boolean_literal => |c| blk: {
-                try writer.print("invalid boolean literal `{c}`", .{c});
-                break :blk null;
-            },
         };
-        if (static_str) |str| try writer.writeAll(str);
+        try writer.writeAll(str);
     }
 };
 

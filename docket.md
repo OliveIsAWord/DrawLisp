@@ -9,6 +9,7 @@
 - `eval` and `apply`
 - `set-car!` and `set-cdr!`
 - `while`
+- `time-ns`
 - Random number generation
 
 # Image processing
@@ -21,7 +22,6 @@
 
 # Code maintenance and refactoring
 - Handle draw errors more cleanly, rather than using `std.debug.print`
-- (Easy) Remove "invalid boolean literal" lexer error
 - Pass `?*Value.Cons` to primitive impls (fixes todos like `getArgsNoEval`)
 - Code deduplication on primitive impls, particularly arithmetic and draw ops
 - Type reflection to automatically generate `canvas_runner.Message` type and implementations
