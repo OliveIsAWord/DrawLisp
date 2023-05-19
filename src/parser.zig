@@ -118,7 +118,7 @@ pub fn parse(
                     std.fmt.ParseIntError.InvalidCharacter => {
                         // TODO: make this unreachable
                         return .{ .parse_error = .{
-                            .kind = .{ .todo = "invalid character in integer literal"},
+                            .kind = .{ .todo = "invalid character in integer literal" },
                             .span = span,
                         } };
                     },
