@@ -8,7 +8,6 @@
 - `eval` and `apply`
 - `set-car!` and `set-cdr!`
 - `while`
-- `time-ns`
 - Random number generation
 
 # Image processing

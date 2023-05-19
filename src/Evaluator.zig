@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const AllocError = Allocator.Error;
 const Thread = std.Thread;
 const math = std.math;
+const nanoTimestamp = std.time.nanoTimestamp;
 
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
@@ -28,6 +29,7 @@ draw_thread: Thread,
 recursion_limit: usize = 500,
 stacktrace: std.ArrayListUnmanaged(*Value.Cons) = .{},
 types_to_symbols: [max_type_tag]i32,
+start_time: i128,
 
 const max_type_tag = blk: {
     var max = 0;
@@ -877,6 +879,12 @@ const primitive_impls = struct {
         try self.printValue(arg);
         return .{ .value = .nil };
     }
+    fn @"time-ns"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        const time = nanoTimestamp() - self.start_time;
+        // This will overflow after about ~292.5 years. So much for Zig's claims of "robust" software...
+        return .{ .value = .{ .int =  @truncate(i64, time) } };
+    }
     const @"set!" = todo;
     const @"set-car!" = todo;
     const @"set-cdr!" = todo;
@@ -1110,6 +1118,7 @@ pub fn init(
         .draw_error_queue = draw_error_queue_ptr,
         .draw_thread = draw_thread,
         .types_to_symbols = types_to_symbols,
+        .start_time = nanoTimestamp(),
     };
 }
 
