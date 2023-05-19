@@ -46,13 +46,14 @@ These are notes for this tool which I don't want to leave undocumented but I als
 - DrawLisp is early-binding with variables.
 - DrawLisp is lexically scoped.
 - Recursion is vaguely supported but requires using a fixed-point combinator, but is not encouraged as it will eventually cause an unrecoverable stack overflow in the evaluator.
+- Whether a builtin function is a lambda or a primitive is an implementation detail, and users should not depend on this difference.
 
 # Terminology
 List - Either `()`, or a value `x` of type `cons` such that `(cdr x)` is a list.
 
 # Builtin Values
 - `true`: The truthy value.
-- `false`: The truthy value.
+- `false`: The falsy value.
 - `white`: The color `#ffffff`.
 - `black`: The color `#000000`.
 
