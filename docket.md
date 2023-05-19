@@ -20,7 +20,6 @@
 
 # Code maintenance and refactoring
 - Handle draw errors more cleanly, rather than using `std.debug.print`
-- Pass `?*Value.Cons` to primitive impls (fixes todos like `getArgsNoEval`)
 - Code deduplication on primitive impls, particularly arithmetic and draw ops
 - Type reflection to automatically generate `canvas_runner.Message` type and implementations
 - Refactor `Evaluator.lexical_settings` to avoid code duplication and code bloat

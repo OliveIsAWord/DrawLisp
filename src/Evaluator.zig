@@ -126,8 +126,8 @@ fn getArgsNoEvalPartial(
 
 fn getArgsNoEval(comptime num_args: comptime_int, list: ?Value.Cons) GetArgsOutput(num_args) {
     return switch (getArgsNoEvalPartial(num_args, list)) {
-        .args => |out| if (out.rest) |_| .{
-            .eval_error = .{ .todo = "extra args" },
+        .args => |out| if (out.rest) |arg_cons| .{
+            .eval_error = .{ .extra_args = arg_cons },
         } else .{ .args = out.first },
         .eval_error => |e| .{ .eval_error = e },
     };
@@ -281,13 +281,11 @@ const lexical_settings = .{
 };
 
 const primitive_impls = struct {
-    fn quote(_: *Self, list_: ?Value.Cons) !EvalOutput {
-        const cons = list_ orelse return .{ .value = .nil };
-        switch (cons.cdr.toListPartial()) {
-            .list => |v| if (v) |_| return .{ .eval_error = .{ .extra_args = cons.cdr } },
-            .bad => return .{ .eval_error = .{ .malformed_list = cons.cdr } },
-        }
-        return .{ .value = cons.car };
+    fn quote(_: *Self, list: ?Value.Cons) !EvalOutput {
+        return switch (getArgsNoEval(1, list)) {
+            .args => |a| .{ .value = a[0] },
+            .eval_error => |e| .{ .eval_error = e },
+        };
     }
     fn @"type-of"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(1, self, list)) {
@@ -569,7 +567,8 @@ const primitive_impls = struct {
         const true_body = out.first[1];
         const false_body = if (out.rest) |cons| switch (cons.cdr) {
             .nil => cons.car,
-            else => |e| return .{ .eval_error = .{ .extra_args = e } },
+            .cons => |c| return .{ .eval_error = .{ .extra_args = c.* } },
+            else => |e| return .{ .eval_error = .{ .malformed_list = e } },
         } else .nil;
         const evaled_condition = switch (try self.eval(condition)) {
             .value => |v| v,
@@ -880,10 +879,10 @@ const primitive_impls = struct {
         return .{ .value = .nil };
     }
     fn @"time-ns"(self: *Self, list: ?Value.Cons) !EvalOutput {
-        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        if (list) |args_cons| return .{ .eval_error = .{ .extra_args = args_cons } };
         const time = nanoTimestamp() - self.start_time;
         // This will overflow after about ~292.5 years. So much for Zig's claims of "robust" software...
-        return .{ .value = .{ .int =  @truncate(i64, time) } };
+        return .{ .value = .{ .int = @truncate(i64, time) } };
     }
     const @"set!" = todo;
     const @"set-car!" = todo;
@@ -920,13 +919,13 @@ const primitive_impls = struct {
     }
 
     fn draw(self: *Self, list: ?Value.Cons) !EvalOutput {
-        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        if (list) |args_cons| return .{ .eval_error = .{ .extra_args = args_cons } };
         self.draw_queue.push(.draw);
         return .{ .value = .nil };
     }
 
     fn clear(self: *Self, list: ?Value.Cons) !EvalOutput {
-        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        if (list) |args_cons| return .{ .eval_error = .{ .extra_args = args_cons } };
         self.draw_queue.push(.clear);
         return .{ .value = .nil };
     }
@@ -961,7 +960,7 @@ const primitive_impls = struct {
     }
 
     fn @"destroy-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
-        if (list) |_| return .{ .eval_error = .{ .extra_args = .nil } };
+        if (list) |args_cons| return .{ .eval_error = .{ .extra_args = args_cons } };
         self.draw_queue.push(.destroy_window);
         return .{ .value = .nil };
     }
@@ -996,7 +995,7 @@ pub const EvalError = union(enum) {
     cannot_call: Value,
     malformed_list: Value,
     expected_type: struct { expected: TypeMask, found: Value },
-    extra_args: Value,
+    extra_args: Value.Cons,
     not_enough_args,
     division_by_zero,
     recursion_limit,
@@ -1033,8 +1032,10 @@ pub const EvalError = union(enum) {
                 try writer.writeByte('`');
             },
             .extra_args => |v| {
+                var v1 = v;
+                const temp_value = Value{ .cons = &v1 };
                 try writer.writeAll("extra args `");
-                try v.print(writer, symbols);
+                try temp_value.print(writer, symbols);
                 try writer.writeByte('`');
             },
             .not_enough_args => try writer.writeAll("not enough args"),
@@ -1366,7 +1367,7 @@ fn eval_cons(self: *Self, pair: *Value.Cons) !EvalOutput {
             }
             switch (arg_list) {
                 .nil => {},
-                .cons => return .{ .eval_error = .{ .extra_args = arg_list } },
+                .cons => |c| return .{ .eval_error = .{ .extra_args = c.* } },
                 else => return .{ .eval_error = .{ .malformed_list = arg_list } },
             }
             return self.eval(lambda.body);
