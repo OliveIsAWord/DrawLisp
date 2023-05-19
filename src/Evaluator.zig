@@ -362,6 +362,8 @@ const primitive_impls = struct {
             .eval_error => |e| return .{ .eval_error = e },
         };
         const op = out[0];
+        if (op != .lambda and op != .primitive)
+            return .{ .eval_error = .{ .cannot_call = op } };
         var cur_list = out[1];
         if (cur_list != .nil and cur_list != .cons) {
             return .{ .eval_error = .{ .expected_type = .{
@@ -379,11 +381,9 @@ const primitive_impls = struct {
                 } else break,
                 .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
             };
-            // Create and eval `(op element)` without GC allocating
-            // TODO: This could easily be unsound
             var local_cons1 = .{ .car = element, .cdr = .nil };
-            var local_cons2 = .{ .car = op, .cdr = .{ .cons = &local_cons1 } };
-            const op_call = .{ .cons = &local_cons2 };
+            var local_cons2 = .{ .car = op, .cdr = .{ .cons = try self.gc.create_cons(local_cons1) } };
+            const op_call = .{ .cons = try self.gc.create_cons(local_cons2) };
             const out_element = switch (try self.eval(op_call)) {
                 .value => |v| v,
                 else => |e| return e,
@@ -404,6 +404,8 @@ const primitive_impls = struct {
             .eval_error => |e| return .{ .eval_error = e },
         };
         const op = out[0];
+        if (op != .lambda and op != .primitive)
+            return .{ .eval_error = .{ .cannot_call = op } };
         var cur_list = out[1];
         if (cur_list != .nil and cur_list != .cons) {
             return .{ .eval_error = .{ .expected_type = .{
@@ -421,11 +423,9 @@ const primitive_impls = struct {
                 } else break,
                 .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
             };
-            // Create and eval `(op element)` without GC allocating
-            // TODO: This could easily be unsound
             var local_cons1 = .{ .car = element, .cdr = .nil };
-            var local_cons2 = .{ .car = op, .cdr = .{ .cons = &local_cons1 } };
-            const op_call = .{ .cons = &local_cons2 };
+            var local_cons2 = .{ .car = op, .cdr = .{ .cons = try self.gc.create_cons(local_cons1) } };
+            const op_call = .{ .cons = try self.gc.create_cons(local_cons2) };
             const should_retain = switch (try self.eval(op_call)) {
                 .value => |v| switch (v) {
                     .bool => |b| b,
@@ -453,6 +453,8 @@ const primitive_impls = struct {
             .eval_error => |e| return .{ .eval_error = e },
         };
         const op = out[0];
+        if (op != .lambda and op != .primitive)
+            return .{ .eval_error = .{ .cannot_call = op } };
         var accumulator = out[1];
         var cur_list = out[2];
         if (cur_list != .nil and cur_list != .cons) {
@@ -469,12 +471,10 @@ const primitive_impls = struct {
                 } else break,
                 .bad => |b| return .{ .eval_error = .{ .malformed_list = b } },
             };
-            // Create and eval `(op accumulator element)` without GC allocating
-            // TODO: This could easily be unsound
             var local_cons1 = .{ .car = element, .cdr = .nil };
-            var local_cons2 = .{ .car = accumulator, .cdr = .{ .cons = &local_cons1 } };
-            var local_cons3 = .{ .car = op, .cdr = .{ .cons = &local_cons2 } };
-            const op_call = .{ .cons = &local_cons3 };
+            var local_cons2 = .{ .car = accumulator, .cdr = .{ .cons = try self.gc.create_cons(local_cons1) } };
+            var local_cons3 = .{ .car = op, .cdr = .{ .cons = try self.gc.create_cons(local_cons2) } };
+            const op_call = .{ .cons = try self.gc.create_cons(local_cons3) };
             accumulator = switch (try self.eval(op_call)) {
                 .value => |v| v,
                 else => |e| return e,
