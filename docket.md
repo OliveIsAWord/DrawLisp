@@ -5,10 +5,10 @@
 - Define functions with `let`
 - Pretty print parse errors
 - Floats, or some other non-integral numeric type
-- `eval` and `apply`
 - `while`
 - Random number generation
 - `void` type
+- variadic lambdas
 
 # Image processing
 - Transparency

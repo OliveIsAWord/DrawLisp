@@ -239,7 +239,7 @@ fn is_type(comptime types: anytype) PrimitiveImpl {
     }.f;
 }
 
-fn set_cons_field(comptime field: []const u8) fn(self: *Self, list: ?Value.Cons) anyerror!EvalOutput {
+fn set_cons_field(comptime field: []const u8) fn (self: *Self, list: ?Value.Cons) anyerror!EvalOutput {
     return struct {
         fn f(self: *Self, list: ?Value.Cons) !EvalOutput {
             const args = switch (try getArgs(2, self, list)) {
@@ -249,7 +249,7 @@ fn set_cons_field(comptime field: []const u8) fn(self: *Self, list: ?Value.Cons)
             const cons = switch (args[0]) {
                 .cons => |c| c,
                 else => |e| return .{ .eval_error = .{ .expected_type = .{
-                    .expected = TypeMask.new(&.{ .cons }),
+                    .expected = TypeMask.new(&.{.cons}),
                     .found = e,
                 } } },
             };
@@ -311,6 +311,28 @@ const primitive_impls = struct {
             .args => |a| .{ .value = a[0] },
             .eval_error => |e| .{ .eval_error = e },
         };
+    }
+    fn eval(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(1, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        return self.eval(args[0]);
+    }
+    fn apply(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const func = args[0];
+        const arg_list = args[1];
+        // Eagerly catch this error before we evaluate anything, just for fun
+        if (arg_list != .nil and arg_list != .cons) return .{ .eval_error = .{ .expected_type = .{
+            .expected = TypeMask.new(&.{ .nil, .cons }),
+            .found = arg_list,
+        } } };
+        const func_call = .{ .cons = try self.gc.create_cons(.{ .car = func, .cdr = arg_list }) };
+        return self.eval(func_call);
     }
     fn @"type-of"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(1, self, list)) {
