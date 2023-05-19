@@ -6,7 +6,6 @@
 - Pretty print parse errors
 - Floats, or some other non-integral numeric type
 - `eval` and `apply`
-- `set-car!` and `set-cdr!`
 - `while`
 - Random number generation
 - `void` type

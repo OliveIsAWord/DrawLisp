@@ -239,6 +239,26 @@ fn is_type(comptime types: anytype) PrimitiveImpl {
     }.f;
 }
 
+fn set_cons_field(comptime field: []const u8) fn(self: *Self, list: ?Value.Cons) anyerror!EvalOutput {
+    return struct {
+        fn f(self: *Self, list: ?Value.Cons) !EvalOutput {
+            const args = switch (try getArgs(2, self, list)) {
+                .args => |a| a,
+                .eval_error => |e| return .{ .eval_error = e },
+            };
+            const cons = switch (args[0]) {
+                .cons => |c| c,
+                else => |e| return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{ .cons }),
+                    .found = e,
+                } } },
+            };
+            @field(cons, field) = args[1];
+            return .{ .value = .nil };
+        }
+    }.f;
+}
+
 fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
     return .{ .eval_error = .{ .todo = "unimplemented function" } };
 }
@@ -347,6 +367,8 @@ const primitive_impls = struct {
         };
         return .{ .value = x.cdr };
     }
+    const @"set-car!" = set_cons_field("car");
+    const @"set-cdr!" = set_cons_field("cdr");
     fn @" cons"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
             .args => |a| a,
@@ -890,8 +912,6 @@ const primitive_impls = struct {
         return .{ .value = .{ .int = @truncate(i64, time) } };
     }
     const @"set!" = todo;
-    const @"set-car!" = todo;
-    const @"set-cdr!" = todo;
 
     fn color(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getVarArgs(1, 4, self, list)) {
