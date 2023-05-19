@@ -51,7 +51,7 @@ pub fn main() !void {
         );
         if (stdlib_eval_out != .return_value) {
             stderr.writeAll("Error while compiling standard library\n") catch {};
-            stdlib_eval_out.println(stderr, symbol_table) catch {};
+            stdlib_eval_out.println(evaluator, stderr) catch {};
             stderr_bw.flush() catch {};
             return StartupError.BadStdlib;
         }
@@ -103,7 +103,7 @@ pub fn main() !void {
             input,
             .{ .top_level_parens_optional = true },
         );
-        try eval_output.println(stdout, symbol_table);
+        try eval_output.println(evaluator, stdout);
         try stdout_bw.flush();
     }
 }

@@ -25,6 +25,8 @@ symbol_table: *SymbolTable,
 draw_queue: *Queue(CanvasMessage),
 draw_error_queue: *Queue([]const u8),
 draw_thread: Thread,
+recursion_limit: usize = 500,
+stacktrace: std.ArrayListUnmanaged(*Value.Cons) = .{},
 
 pub const Variable = struct { symbol: i32, value: Value };
 pub const Map = std.ArrayList(Variable);
@@ -857,7 +859,7 @@ const primitive_impls = struct {
             .eval_error => |e| return .{ .eval_error = e },
         };
         const arg = args[0];
-        try self.print_value(arg);
+        try self.printValue(arg);
         return .{ .value = .nil };
     }
     const @"set!" = todo;
@@ -974,13 +976,15 @@ pub const EvalError = union(enum) {
     extra_args: Value,
     not_enough_args,
     division_by_zero,
+    recursion_limit,
     unknown_lexical_setting: i32,
     //sdl_error: []const u8,
     out_of_cint_range: i64,
     todo: []const u8,
 
-    pub fn print(self: @This(), writer: RuntimeWriter, symbols: SymbolTable) !void {
-        return switch (self) {
+    pub fn print(this_error: @This(), self: Self, writer: RuntimeWriter) !void {
+        const symbols = self.symbol_table.*;
+        return switch (this_error) {
             .variable_not_found => |s| writer.print(
                 "variable `{s}` not defined",
                 .{symbols.getByIndex(s)},
@@ -1012,6 +1016,10 @@ pub const EvalError = union(enum) {
             },
             .not_enough_args => try writer.writeAll("not enough args"),
             .division_by_zero => try writer.writeAll("division by zero"),
+            .recursion_limit => try writer.print(
+                "recursion limit of {} exceeded",
+                .{self.recursion_limit},
+            ),
             .unknown_lexical_setting => |s| writer.print(
                 "unknown lexical setting `{s}`",
                 .{symbols.getByIndex(s)},
@@ -1086,7 +1094,7 @@ pub fn init(
 
 pub fn printVars(self: Self) !void {
     for (self.map.items) |variable| {
-        try self.print_value(variable.value);
+        try self.printValue(variable.value);
     }
 }
 
@@ -1123,9 +1131,39 @@ fn destroyScope(self: *Self, old_len: usize) void {
     self.map.shrinkRetainingCapacity(old_len);
 }
 
-fn print_value(self: Self, value: Value) anyerror!void {
+fn printValue(self: Self, value: Value) anyerror!void {
     try value.print(self.writer, self.symbol_table.*);
     try self.writer.writeByte('\n');
+}
+
+fn printStacktrace(self: Self, writer: RuntimeWriter) !void {
+    const printStacktraceSlice = struct {
+        fn f(
+            writer1: RuntimeWriter,
+            self1: Self,
+            lower: usize,
+            upper: usize,
+        ) !void {
+            const stacktrace = self1.stacktrace.items;
+            var i = upper;
+            while (i > lower) {
+                i -= 1;
+                try writer1.print("{}: ", .{i});
+                try self1.printValue(.{ .cons = stacktrace[i] });
+            }
+        }
+    }.f;
+    const max_latest_items = 5;
+    const max_earliest_items = 3;
+    const len = self.stacktrace.items.len;
+    if (len < 2) return;
+    if (len <= max_latest_items + max_earliest_items + 1) {
+        try printStacktraceSlice(writer, self, 0, len);
+    } else {
+        try printStacktraceSlice(writer, self, len - max_latest_items, len);
+        try writer.writeAll("...\n");
+        try printStacktraceSlice(writer, self, 0, max_earliest_items);
+    }
 }
 
 const EvalSettings = struct {
@@ -1136,22 +1174,30 @@ const InterpreterOutput = union(enum) {
     parse_error: parser.ParseError,
     eval_error: EvalError,
     return_value: ?Value,
-    pub fn println(self: @This(), writer: RuntimeWriter, symbols: SymbolTable) !void {
-        switch (self) {
+    pub fn println(this_output: @This(), self: Self, writer: RuntimeWriter) !void {
+        const symbols = self.symbol_table.*;
+        switch (this_output) {
             .parse_error => |e| {
                 try writer.writeAll("Parse error: ");
                 try e.print(writer);
+                try writer.writeByte('\n');
             },
             .eval_error => |e| {
                 try writer.writeAll("Eval error: ");
-                try e.print(writer, symbols);
+                try e.print(self, writer);
+                try writer.writeByte('\n');
+                try self.printStacktrace(writer);
             },
-            .return_value => |v_| if (v_) |v| try v.print(writer, symbols) else return,
+            .return_value => |v_| {
+                std.debug.assert(self.stacktrace.items.len == 0);
+                if (v_) |v| try v.print(writer, symbols) else return;
+                try writer.writeByte('\n');
+            },
         }
-        try writer.writeByte('\n');
     }
 };
 pub fn evalSource(self: *Self, source: []const u8, settings: EvalSettings) !InterpreterOutput {
+    self.stacktrace.clearRetainingCapacity();
     var token_iter = lexer.TokenIterator.init(source);
     const EvalFolder = union(enum) {
         last: ?Value,
@@ -1230,7 +1276,7 @@ pub fn flushDrawErrorQueue(self: *Self) void {
     }
 }
 
-pub fn eval(self: *Self, value: Value) !EvalOutput {
+pub fn eval(self: *Self, value: Value) anyerror!EvalOutput {
     self.flushDrawErrorQueue();
     switch (value) {
         .nil, .bool, .int, .primitive_function, .lambda, .color => return .{ .value = value },
@@ -1238,50 +1284,64 @@ pub fn eval(self: *Self, value: Value) !EvalOutput {
             return .{ .eval_error = .{ .variable_not_found = s } };
         },
         .cons => |pair| {
-            const function_out = try self.eval(pair.car);
-            if (function_out.is_error()) return function_out;
-            const function = function_out.value;
-            switch (function) {
-                .primitive_function => |f| {
-                    const args = pair.cdr.toListPartial();
-                    switch (args) {
-                        .list => |list| return f(self, list),
-                        .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
-                    }
-                },
-                .lambda => |lambda| {
-                    const old_len = self.map.items.len;
-                    defer self.destroyScope(old_len);
-                    try self.map.ensureUnusedCapacity(lambda.binds.len + lambda.args.items.len);
-                    self.map.appendSliceAssumeCapacity(lambda.binds);
-                    var arg_list: Value = pair.cdr;
-                    for (lambda.args.items) |arg_symbol| {
-                        const args = arg_list.toListPartial();
-                        switch (args) {
-                            .list => |list| if (list) |cons| {
-                                const arg_value = switch (try self.eval(cons.car)) {
-                                    .value => |v| v,
-                                    else => |e| return e,
-                                };
-                                self.map.appendAssumeCapacity(.{
-                                    .symbol = arg_symbol,
-                                    .value = arg_value,
-                                });
-                                arg_list = cons.cdr;
-                            } else return .{ .eval_error = .not_enough_args },
-                            .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
-                        }
-                    }
-                    switch (arg_list) {
-                        .nil => {},
-                        .cons => return .{ .eval_error = .{ .extra_args = arg_list } },
-                        else => return .{ .eval_error = .{ .malformed_list = arg_list } },
-                    }
-                    return self.eval(lambda.body);
-                },
-                else => return .{ .eval_error = .{ .cannot_call = function } },
+            if (self.stacktrace.items.len >= self.recursion_limit)
+                return .{ .eval_error = .recursion_limit };
+            try self.stacktrace.append(self.map.allocator, pair);
+            var is_error = true;
+            defer if (!is_error) {
+                _ = self.stacktrace.pop();
+            };
+            const out = try self.eval_cons(pair);
+            if (out == .value) is_error = false;
+            return out;
+        },
+    }
+}
+
+fn eval_cons(self: *Self, pair: *Value.Cons) !EvalOutput {
+    self.flushDrawErrorQueue();
+    const function_out = try self.eval(pair.car);
+    if (function_out.is_error()) return function_out;
+    const function = function_out.value;
+    switch (function) {
+        .primitive_function => |f| {
+            const args = pair.cdr.toListPartial();
+            switch (args) {
+                .list => |list| return f(self, list),
+                .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
             }
         },
+        .lambda => |lambda| {
+            const old_len = self.map.items.len;
+            defer self.destroyScope(old_len);
+            try self.map.ensureUnusedCapacity(lambda.binds.len + lambda.args.items.len);
+            self.map.appendSliceAssumeCapacity(lambda.binds);
+            var arg_list: Value = pair.cdr;
+            for (lambda.args.items) |arg_symbol| {
+                const args = arg_list.toListPartial();
+                switch (args) {
+                    .list => |list| if (list) |cons| {
+                        const arg_value = switch (try self.eval(cons.car)) {
+                            .value => |v| v,
+                            else => |e| return e,
+                        };
+                        self.map.appendAssumeCapacity(.{
+                            .symbol = arg_symbol,
+                            .value = arg_value,
+                        });
+                        arg_list = cons.cdr;
+                    } else return .{ .eval_error = .not_enough_args },
+                    .bad => |v| return .{ .eval_error = .{ .malformed_list = v } },
+                }
+            }
+            switch (arg_list) {
+                .nil => {},
+                .cons => return .{ .eval_error = .{ .extra_args = arg_list } },
+                else => return .{ .eval_error = .{ .malformed_list = arg_list } },
+            }
+            return self.eval(lambda.body);
+        },
+        else => return .{ .eval_error = .{ .cannot_call = function } },
     }
     self.flushDrawErrorQueue();
 }
@@ -1298,5 +1358,6 @@ pub fn deinit(self: *Self) void {
     self.draw_error_queue.deinit(self.map.allocator);
     self.map.allocator.destroy(self.draw_queue);
     self.map.allocator.destroy(self.draw_error_queue);
+    self.stacktrace.deinit(self.map.allocator);
     self.* = undefined;
 }

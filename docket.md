@@ -2,7 +2,6 @@
 - Execute lisp source file as program
 - Use hash maps for variable lookup?
 - Tail call optimization
-- Recursion limit
 - Define functions with `let`
 - `typeof`
 - Pretty print parse errors
@@ -11,7 +10,6 @@
 - `set-car!` and `set-cdr!`
 - `while`
 - Random number generation
-- Stack trace on error
 
 # Image processing
 - Transparency
