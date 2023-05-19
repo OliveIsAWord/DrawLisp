@@ -894,12 +894,13 @@ const primitive_impls = struct {
     const @"set-cdr!" = todo;
 
     fn color(self: *Self, list: ?Value.Cons) !EvalOutput {
-        const args = switch (try getArgs(3, self, list)) {
+        const args = switch (try getVarArgs(1, 4, self, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
         };
-        var ints: [3]u8 = undefined;
-        for (args) |a, i| {
+        if (args.len == 2) return .{ .eval_error = .not_enough_args };
+        var ints: [4]u8 = undefined;
+        for (args.buffer[0..args.len]) |a, i| {
             switch (a) {
                 .int => |v| ints[i] = saturatingCast(u8, v),
                 else => return .{ .eval_error = .{ .expected_type = .{
@@ -908,7 +909,12 @@ const primitive_impls = struct {
                 } } },
             }
         }
-        const meow_color = .{ .r = ints[0], .g = ints[1], .b = ints[2] };
+        if (args.len == 1) {
+            ints[1] = ints[0];
+            ints[2] = ints[0];
+        }
+        if (args.len < 4) ints[3] = 255;
+        const meow_color = .{ .r = ints[0], .g = ints[1], .b = ints[2], .a = ints[3] };
         return .{ .value = .{ .color = meow_color } };
     }
 
