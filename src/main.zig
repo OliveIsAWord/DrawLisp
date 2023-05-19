@@ -12,7 +12,7 @@ const Gc = @import("Gc.zig");
 const RuntimeWriter = @import("RuntimeWriter.zig");
 
 const cli_ = .{ .interactive = .{} };
-const stdlib_source = @embedFile("std.lisp");
+const stdlib_source = @embedFile("std.drawlisp");
 
 const StartupError = error{
     BadStdlib,

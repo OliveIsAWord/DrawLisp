@@ -1,0 +1,48 @@
+create-window 1000 1000
+(clear)
+let :fill-color #ff000011
+let :stroke-color #00000011
+let start-time (time-ns)
+for-each (range 100) (lambda x
+    (let i (+ (* x 10) 50))
+    (rect i i i i)
+    ;(draw)
+)
+let end-time (time-ns)
+- end-time start-time
+
+create-window 1000 1000
+(clear)
+let :stroke-color transparent
+let start-time (time-ns)
+for-each (range 10000) (lambda x
+    (let i (% x 256))
+    (let :fill-color (color i i i))
+    (rect 100 100 800 800)
+    ;(draw)
+)
+let end-time (time-ns)
+- end-time start-time
+
+
+; draw_queue capacity of
+; 1
+; 8
+; 4096
+
+; 842225200
+; 214684300
+; 41536100
+
+; 1693456500
+; 1626400300
+; 40035200
+
+let start-time (time-ns)
+for-each (range 1000) (lambda x (create-window 1_000_000 1_000_000))
+let end-time (time-ns)
+- end-time start-time
+
+; 465399800
+; 437376100
+; 497427500
