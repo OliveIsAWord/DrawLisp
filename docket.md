@@ -3,7 +3,6 @@
 - Use hash maps for variable lookup?
 - Tail call optimization
 - Define functions with `let`
-- `typeof`
 - Pretty print parse errors
 - Floats, or some other non-integral numeric type
 - `eval` and `apply`

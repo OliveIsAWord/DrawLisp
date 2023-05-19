@@ -27,6 +27,13 @@ draw_error_queue: *Queue([]const u8),
 draw_thread: Thread,
 recursion_limit: usize = 500,
 stacktrace: std.ArrayListUnmanaged(*Value.Cons) = .{},
+types_to_symbols: [max_type_tag]i32,
+
+const max_type_tag = blk: {
+    var max = 0;
+    for (@typeInfo(Type).Enum.fields) |field| max = @max(max, field.value);
+    break :blk max + 1;
+};
 
 pub const Variable = struct { symbol: i32, value: Value };
 pub const Map = std.ArrayList(Variable);
@@ -280,15 +287,23 @@ const primitive_impls = struct {
         }
         return .{ .value = cons.car };
     }
-    const @"atom?" = is_type(.{ .nil, .int, .bool, .symbol, .primitive_function, .lambda, .color });
+    fn @"type-of"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(1, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const symbol = self.types_to_symbols[@enumToInt(args[0])];
+        return .{ .value = .{ .symbol = symbol } };
+    }
+    const @"atom?" = is_type(.{ .nil, .int, .bool, .symbol, .primitive, .lambda, .color });
     const @"nil?" = is_type(.{.nil});
     const @"cons?" = is_type(.{.cons});
     const @"int?" = is_type(.{.int});
     const @"bool?" = is_type(.{.bool});
     const @"symbol?" = is_type(.{.symbol});
-    const @"primitive?" = is_type(.{.primitive_function});
+    const @"primitive?" = is_type(.{.primitive});
     const @"lambda?" = is_type(.{.lambda});
-    const @"function?" = is_type(.{ .primitive_function, .lambda });
+    const @"function?" = is_type(.{ .primitive, .lambda });
     const @"color?" = is_type(.{.color});
     fn @"eq?"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(2, self, list)) {
@@ -626,7 +641,7 @@ const primitive_impls = struct {
         // should we keep track of a set of symbols not to bind?
         while (self.visit_stack.popOrNull()) |visit| {
             switch (visit) {
-                .nil, .int, .bool, .primitive_function, .color => {},
+                .nil, .int, .bool, .primitive, .color => {},
                 .symbol => |symbol| if (self.getVar(symbol)) |current_value| {
                     try binds.append(.{ .symbol = symbol, .value = current_value });
                 },
@@ -642,7 +657,7 @@ const primitive_impls = struct {
         const runnable_body: Value = if (body.cdr == .nil) body.car else blk: {
             const cons_body = try self.gc.create_cons(body);
             const cons_inner = .{
-                .car = .{ .primitive_function = begin },
+                .car = .{ .primitive = begin },
                 .cdr = .{ .cons = cons_body },
             };
             const cons = try self.gc.create_cons(cons_inner);
@@ -949,7 +964,7 @@ const PrimitiveEntry = struct {
     name: []const u8,
     impl: PrimitiveImpl,
 };
-pub const primitive_functions = blk: {
+pub const primitives = blk: {
     const show_me_todos = false;
     var todo_list: []const u8 = &.{};
     const decls = @typeInfo(primitive_impls).Struct.decls;
@@ -1055,15 +1070,20 @@ pub fn init(
     symbol_table: *SymbolTable,
     writer: RuntimeWriter,
 ) !Self {
-    const len = primitive_functions.len;
-    try symbol_table.ensureUnusedCapacity(len);
+    const all_types = @typeInfo(Type).Enum.fields;
+    const len = primitives.len;
+    try symbol_table.ensureUnusedCapacity(len + all_types.len);
     var map = try Map.initCapacity(evaluator_alloc, len);
     errdefer map.deinit();
-    for (primitive_functions) |entry| {
+    for (primitives) |entry| {
         const identifier = entry.name;
-        const value = .{ .primitive_function = entry.impl };
+        const value = .{ .primitive = entry.impl };
         const symbol = try symbol_table.put(identifier);
         map.appendAssumeCapacity(.{ .symbol = symbol, .value = value });
+    }
+    var types_to_symbols: [max_type_tag]i32 = undefined;
+    inline for (all_types) |field| {
+        types_to_symbols[field.value] = try symbol_table.getOrPut(field.name);
     }
     var draw_queue = try Queue(CanvasMessage).init(evaluator_alloc, 8);
     errdefer draw_queue.deinit(evaluator_alloc);
@@ -1089,6 +1109,7 @@ pub fn init(
         .draw_queue = draw_queue_ptr,
         .draw_error_queue = draw_error_queue_ptr,
         .draw_thread = draw_thread,
+        .types_to_symbols = types_to_symbols,
     };
 }
 
@@ -1279,7 +1300,7 @@ pub fn flushDrawErrorQueue(self: *Self) void {
 pub fn eval(self: *Self, value: Value) anyerror!EvalOutput {
     self.flushDrawErrorQueue();
     switch (value) {
-        .nil, .bool, .int, .primitive_function, .lambda, .color => return .{ .value = value },
+        .nil, .bool, .int, .primitive, .lambda, .color => return .{ .value = value },
         .symbol => |s| if (self.getVar(s)) |v| return .{ .value = v } else {
             return .{ .eval_error = .{ .variable_not_found = s } };
         },
@@ -1304,7 +1325,7 @@ fn eval_cons(self: *Self, pair: *Value.Cons) !EvalOutput {
     if (function_out.is_error()) return function_out;
     const function = function_out.value;
     switch (function) {
-        .primitive_function => |f| {
+        .primitive => |f| {
             const args = pair.cdr.toListPartial();
             switch (args) {
                 .list => |list| return f(self, list),
