@@ -11,6 +11,7 @@ pub const Token = enum {
     quote,
     dot,
     integer_literal,
+    color_literal,
     identifier,
     eof,
 };
@@ -29,11 +30,15 @@ fn is_one_of(comptime chars: anytype) fn (anytype) bool {
 const is_whitespace = is_one_of(std.ascii.whitespace);
 
 fn is_delimiter(c: u8) bool {
-    return is_whitespace(c) or is_one_of(.{ '\x00', '(', ')', '"', ';', '.' })(c);
+    return is_whitespace(c) or is_one_of(.{ 0, '(', ')', '"', ';', '.' })(c);
 }
 
 fn is_digit(c: u8) bool {
     return '0' <= c and c <= '9';
+}
+
+fn is_hex(c: u8) bool {
+    return is_digit(c) or ('A' <= c and c <= 'F') or ('a' <= c and c <= 'f');
 }
 
 fn eat_whitespace(src_: []const u8) []const u8 {
@@ -75,11 +80,15 @@ pub const LexError = union(enum) {
     const Self = @This();
     generic,
     unexpected_eof,
+    invalid_integer_literal,
+    invalid_color_literal,
 
     pub fn print(self: Self, writer: anytype) !void {
         const str = switch (self) {
             .generic => "unknown",
             .unexpected_eof => "unexpected eof",
+            .invalid_integer_literal => "invalid integer literal",
+            .invalid_color_literal => "invalid color literal",
         };
         try writer.writeAll(str);
     }
@@ -106,12 +115,46 @@ const lexers = struct {
     fn lex_integer_literal(src: []const u8) ?LexOutput {
         const minus_offset = @boolToInt(src[0] == '-');
         var i: usize = minus_offset;
-        while (i < src.len and is_digit(src[i])) i += 1;
+        var is_first_digit = true;
+        while (i < src.len) {
+            defer is_first_digit = false;
+            const c = src[i];
+            if (is_digit(c) or c == '_') {
+                i += 1;
+            } else if (is_delimiter(c)) {
+                break;
+            } else if (is_first_digit) {
+                return null;
+            } else {
+                return .{
+                    .value = .{ .lex_error = .invalid_integer_literal },
+                    .span = src[0 .. i + 1],
+                    .rest = src[i + 1 ..],
+                };
+            }
+        }
         if (i == minus_offset) return null;
         return .{
             .value = .{ .token = .integer_literal },
             .span = src[0..i],
             .rest = src[i..],
+        };
+    }
+    fn lex_color_literal(src: []const u8) ?LexOutput {
+        if (src[0] != '#') return null;
+        const rest = src[1..];
+        var i: usize = 0;
+        var is_error = false;
+        while (i < rest.len) : (i += 1) {
+            const c = rest[i];
+            if (is_delimiter(c)) break;
+            if (!is_hex(c)) is_error = true;
+        }
+        const value: LexOutput.Value = if (i == 6 or i == 8) .{ .token = .color_literal } else .{ .lex_error = .invalid_color_literal };
+        return .{
+            .value = value,
+            .span = src[0 .. i + 1],
+            .rest = src[i + 1 ..],
         };
     }
     fn lex_ident(src: []const u8) ?LexOutput {

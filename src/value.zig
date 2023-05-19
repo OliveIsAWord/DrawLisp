@@ -122,9 +122,8 @@ pub const Value = union(Type) {
                 try writer.writeAll(">");
             },
             .color => |color| {
-                try writer.print("<color #{x:0>2}{x:0>2}{x:0>2}", .{ color.r, color.g, color.b });
+                try writer.print("#{x:0>2}{x:0>2}{x:0>2}", .{ color.r, color.g, color.b });
                 if (color.a < 255) try writer.print("{x:0>2}", .{color.a});
-                try writer.writeAll(">");
             },
         }
     }

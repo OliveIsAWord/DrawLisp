@@ -115,13 +115,31 @@ pub fn parse(
             },
             .integer_literal => blk: {
                 const int = std.fmt.parseInt(i64, token.span, 10) catch |e| switch (e) {
-                    std.fmt.ParseIntError.InvalidCharacter => unreachable,
+                    std.fmt.ParseIntError.InvalidCharacter => {
+                        // TODO: make this unreachable
+                        return .{ .parse_error = .{
+                            .kind = .{ .todo = "invalid character in integer literal"},
+                            .span = span,
+                        } };
+                    },
                     std.fmt.ParseIntError.Overflow => return .{ .parse_error = .{
                         .kind = .integer_literal_overflow,
                         .span = span,
                     } },
                 };
                 break :blk .{ .int = int };
+            },
+            .color_literal => blk: {
+                std.debug.assert(token.span[0] == '#');
+                const rest = token.span[1..];
+                std.debug.assert(rest.len == 6 or rest.len == 8);
+                var rgb: [4]u8 = undefined;
+                rgb[3] = 255; // full opacity by default
+                var i: usize = 0;
+                while (i < rest.len) : (i += 2) {
+                    rgb[i / 2] = std.fmt.parseInt(u8, rest[i .. i + 2], 16) catch unreachable;
+                }
+                break :blk .{ .color = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = rgb[3] } };
             },
             .identifier => blk: {
                 const index = try symbols.getOrPut(token.span);

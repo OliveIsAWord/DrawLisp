@@ -17,8 +17,15 @@
 ; (let compose (lambda (f g) (lambda x (f (g x)))))
 (let reduce (lambda (op list) (fold op (car list) (cdr list))))
 
-(let white (color 255 255 255))
-(let black (color 0 0 0))
+; Is this alignment in the source code good? I frequently find the answer to be "no".
+(let black   #000000)
+(let red     #ff0000)
+(let green   #00ff00)
+(let blue    #0000ff)
+(let cyan    #00ffff)
+(let magenta #ff00ff)
+(let yellow  #ffff00)
+(let white   #ffffff)
 
 (let :clear-color white)
 (let :fill-color white)
