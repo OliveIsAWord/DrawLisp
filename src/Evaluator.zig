@@ -1099,7 +1099,7 @@ pub fn init(
     inline for (all_types) |field| {
         types_to_symbols[field.value] = try symbol_table.getOrPut(field.name);
     }
-    var draw_queue = try Queue(CanvasMessage).init(evaluator_alloc, 8);
+    var draw_queue = try Queue(CanvasMessage).init(evaluator_alloc, 4096);
     errdefer draw_queue.deinit(evaluator_alloc);
     var draw_error_queue = try Queue([]const u8).init(evaluator_alloc, 8);
     errdefer draw_error_queue.deinit(evaluator_alloc);
