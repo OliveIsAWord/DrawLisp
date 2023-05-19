@@ -17,6 +17,9 @@
 ; (let compose (lambda (f g) (lambda x (f (g x)))))
 (let reduce (lambda (op list) (fold op (car list) (cdr list))))
 
+; TODO: This still uses O(n) memory. Make this a primitive?
+(let for-each (lambda (list body) (map (lambda x (body x) ()) list) ()))
+
 ; Is this alignment in the source code good? I frequently find the answer to be "no".
 (let black   #000000)
 (let red     #ff0000)
@@ -26,6 +29,8 @@
 (let magenta #ff00ff)
 (let yellow  #ffff00)
 (let white   #ffffff)
+
+(let transparent #ff00ff00)
 
 (let :clear-color white)
 (let :fill-color white)

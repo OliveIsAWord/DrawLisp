@@ -9,6 +9,7 @@
 - `set-car!` and `set-cdr!`
 - `while`
 - Random number generation
+- `void` type
 
 # Image processing
 - Transparency

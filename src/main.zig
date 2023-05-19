@@ -28,7 +28,6 @@ pub fn main() !void {
     var stdout_bw = std.io.bufferedWriter(stdout_file);
     defer stdout_bw.flush() catch {};
     const stdout = RuntimeWriter.fromBufferedWriter(&stdout_bw);
-    try stdout_bw.flush();
     const stderr_file = std.io.getStdErr().writer();
     var stderr_bw = std.io.bufferedWriter(stderr_file);
     defer stderr_bw.flush() catch {};
@@ -85,7 +84,7 @@ pub fn main() !void {
             .read_error => |e| switch (e) {
                 // TODO: Is this how you do Ctrl-C handling? Works on my machine :3
                 error.EndOfStream => {
-                    stdout.writeAll("Bye.\n") catch {};
+                    stdout.writeAll("\nBye.\n") catch {};
                     stdout_bw.flush() catch {};
                     stderr_bw.flush() catch {};
                     return;
@@ -96,7 +95,10 @@ pub fn main() !void {
         if (input.len == 0) continue;
         if (input[0] == ';') {
             const command = std.mem.trimLeft(u8, input[1..], &std.ascii.whitespace);
-            if (command.len == 0) return;
+            if (command.len == 0) {
+                stdout.writeAll("Bye.\n") catch {};
+                return;
+            }
             continue;
         }
         const eval_output = try evaluator.evalSource(

@@ -257,10 +257,15 @@ fn checkedWrappingMod(dividend: i64, divisor: i64) ?i64 {
     return dividend -% quotient *% divisor;
 }
 
-/// Fallibly casts any integer type to a non-negative `c_int`
+// /// Fallibly casts any integer type to a non-negative `c_int`
+// fn cast_cint_nonn(int: anytype) ?c_int {
+//     const i = cast_cint(int) orelse return null;
+//     return if (i >= 0) i else null;
+// }
+
+/// Fallibly casts any integer type to a `c_int`
 fn cast_cint(int: anytype) ?c_int {
-    const i = math.cast(c_int, int) orelse return null;
-    return if (i >= 0) i else null;
+    return math.cast(c_int, int);
 }
 
 fn saturatingCast(comptime Int: type, value: anytype) Int {
@@ -1049,8 +1054,8 @@ pub const EvalError = union(enum) {
                 .{symbols.getByIndex(s)},
             ),
             .out_of_cint_range => |i| try writer.print(
-                "integer {} out of range (must be between 0 and {})",
-                .{ i, math.maxInt(c_int) },
+                "integer {} out of range (must be between {} and {})",
+                .{ i, math.minInt(c_int), math.maxInt(c_int) },
             ),
             //.sdl_error => |msg| try writer.print("SDL error \"{s}\"", .{msg}),
             .todo => |msg| try writer.print("TODO \"{s}\"", .{msg}),
