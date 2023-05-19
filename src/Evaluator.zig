@@ -334,6 +334,32 @@ const primitive_impls = struct {
         const func_call = .{ .cons = try self.gc.create_cons(.{ .car = func, .cdr = arg_list }) };
         return self.eval(func_call);
     }
+    fn @"while"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const func = switch (getArgsNoEvalPartial(2, list)) {
+            .args => |a| a.first[0],
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const body = .{ .cons = try self.gc.create_cons(.{
+            .car = .{ .primitive = begin },
+            .cdr = list.?.cdr,
+        }) };
+        while (true) {
+            switch (try self.eval(func)) {
+                .value => |v| switch (v) {
+                    .bool => |b| if (!b) return .{ .value = .nil },
+                    else => return .{ .eval_error = .{ .expected_type = .{
+                        .expected = TypeMask.new(&.{.bool}),
+                        .found = v,
+                    } } },
+                },
+                else => |e| return e,
+            }
+            switch (try self.eval(body)) {
+                .value => {},
+                else => |e| return e,
+            }
+        }
+    }
     fn @"type-of"(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(1, self, list)) {
             .args => |a| a,
