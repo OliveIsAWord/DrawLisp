@@ -13,12 +13,17 @@
     ((int? v) (int->bool v))
     ((bool? v) v)
     (true true))))
+    
+(let box (lambda x (cons x ())))
 
 ; (let compose (lambda (f g) (lambda x (f (g x)))))
 (let reduce (lambda (op list) (fold op (car list) (cdr list))))
 
-; TODO: This still uses O(n) memory. Make this a primitive?
-(let for-each (lambda (list body) (map (lambda x (body x) ()) list) ()))
+(let for-each (lambda (list body)
+    (let list (box list))
+    (while (not (nil? (car list)))
+        (body (car (car list)))
+        (set-car! list (cdr (car list))))))
 
 ; Is this alignment in the source code good? I frequently find the answer to be "no".
 (let black   #000000)

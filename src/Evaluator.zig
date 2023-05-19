@@ -344,6 +344,8 @@ const primitive_impls = struct {
             .cdr = list.?.cdr,
         }) };
         while (true) {
+            const old_len = self.map.items.len;
+            defer self.destroyScope(old_len);
             switch (try self.eval(func)) {
                 .value => |v| switch (v) {
                     .bool => |b| if (!b) return .{ .value = .nil },

@@ -7,8 +7,9 @@
 - Floats, or some other non-integral numeric type
 - Random number generation
 - `void` type
-- variadic lambdas
-- square bracket lambda syntax
+- Variadic lambdas
+- Square bracket lambda syntax
+- User exceptions
 
 # Image processing
 - Transparency
