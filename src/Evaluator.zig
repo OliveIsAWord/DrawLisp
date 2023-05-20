@@ -17,6 +17,7 @@ const canvas_runner = @import("canvas_runner.zig");
 const CanvasMessage = canvas_runner.Message;
 const Queue = @import("mpmc_queue.zig").MPMCQueueUnmanaged;
 const Color = @import("Color.zig");
+const Rng = @import("Rng.zig");
 
 map: Map,
 gc: *Gc,
@@ -30,6 +31,7 @@ recursion_limit: usize = 500,
 stacktrace: std.ArrayListUnmanaged(*Value.Cons) = .{},
 types_to_symbols: [max_type_tag]i32,
 start_time: i128,
+rng: Rng = Rng.init(0),
 
 const max_type_tag = blk: {
     var max = 0;
@@ -257,6 +259,48 @@ fn set_cons_field(comptime field: []const u8) fn (self: *Self, list: ?Value.Cons
             return .{ .value = .nil };
         }
     }.f;
+}
+
+const RangeParameters = struct { start: i64, end: i64, step: i64 };
+const GetRangeParametersOut = union(enum) {
+    parameters: RangeParameters,
+    eval_error: EvalError,
+};
+fn getRangeParameters(self: *Self, list: ?Value.Cons) !GetRangeParametersOut {
+    var buffer: [3]i64 = undefined;
+    var len: usize = undefined;
+    switch (try getVarArgs(1, 3, self, list)) {
+        .args => |out| {
+            len = out.len;
+            for (out.buffer[0..len]) |v, i| switch (v) {
+                .int => |n| buffer[i] = n,
+                else => return .{ .eval_error = .{ .expected_type = .{
+                    .expected = TypeMask.new(&.{.int}),
+                    .found = v,
+                } } },
+            };
+        },
+        .eval_error => |e| return .{ .eval_error = e },
+    }
+    const range: RangeParameters = switch (len) {
+        1 => if (buffer[0] < 0) .{
+            .start = buffer[0],
+            .end = 0,
+            .step = 1,
+        } else .{
+            .start = 0,
+            .end = buffer[0],
+            .step = 1,
+        },
+        2 => .{
+            .start = buffer[0],
+            .end = buffer[1],
+            .step = math.sign(buffer[1] -| buffer[0]),
+        },
+        3 => .{ .start = buffer[0], .end = buffer[1], .step = buffer[2] },
+        else => unreachable,
+    };
+    return .{ .parameters = range };
 }
 
 fn todo(_: *Self, _: ?Value.Cons) !EvalOutput {
@@ -555,41 +599,9 @@ const primitive_impls = struct {
         return .{ .value = accumulator };
     }
     fn range(self: *Self, list: ?Value.Cons) !EvalOutput {
-        const Parameters = struct { start: i64, end: i64, step: i64 };
-        const parameters: Parameters = blk: {
-            var buffer: [3]i64 = undefined;
-            var len: usize = undefined;
-            switch (try getVarArgs(1, 3, self, list)) {
-                .args => |out| {
-                    len = out.len;
-                    for (out.buffer[0..len]) |v, i| switch (v) {
-                        .int => |n| buffer[i] = n,
-                        else => return .{ .eval_error = .{ .expected_type = .{
-                            .expected = TypeMask.new(&.{.int}),
-                            .found = v,
-                        } } },
-                    };
-                },
-                .eval_error => |e| return .{ .eval_error = e },
-            }
-            break :blk switch (len) {
-                1 => if (buffer[0] < 0) .{
-                    .start = buffer[0],
-                    .end = 0,
-                    .step = 1,
-                } else .{
-                    .start = 0,
-                    .end = buffer[0],
-                    .step = 1,
-                },
-                2 => .{
-                    .start = buffer[0],
-                    .end = buffer[1],
-                    .step = math.sign(buffer[1] -| buffer[0]),
-                },
-                3 => .{ .start = buffer[0], .end = buffer[1], .step = buffer[2] },
-                else => unreachable,
-            };
+        const parameters = switch (try getRangeParameters(self, list)) {
+            .parameters => |p| p,
+            .eval_error => |e| return .{ .eval_error = e },
         };
         var out_list: Value = .nil;
         if (parameters.start != parameters.end) {
@@ -945,6 +957,36 @@ const primitive_impls = struct {
             };
         }
         return .{ .value = .{ .int = quotient } };
+    }
+    fn @"rand-int"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const parameters = switch (try getRangeParameters(self, list)) {
+            .parameters => |p| p,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const start: i128 = parameters.start;
+        const end: i128 = parameters.end;
+        const step: i128 = parameters.step;
+        const i = math.divCeil(i128, end - start, step) catch
+            return .{ .eval_error = .division_by_zero };
+        if (i <= 0) return .{ .eval_error = .division_by_zero };
+        const u = @intCast(u64, i);
+        const num_steps = self.rng.next() % u;
+        return .{ .value = .{ .int = @intCast(i64, start + step * num_steps) } };
+    }
+    fn @"seed"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const args = switch (try getArgs(1, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const x = switch (args[0]) {
+            .int => |i| i,
+            else => |v| return .{ .eval_error = .{ .expected_type = .{
+                .expected = TypeMask.new(&.{.int}),
+                .found = v,
+            } } },
+        };
+        self.rng = Rng.init(x);
+        return .{ .value = .nil };
     }
     fn print(self: *Self, list: ?Value.Cons) !EvalOutput {
         const args = switch (try getArgs(1, self, list)) {

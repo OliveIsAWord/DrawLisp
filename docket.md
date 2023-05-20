@@ -5,11 +5,11 @@
 - Define functions with `let`
 - Pretty print parse errors
 - Floats, or some other non-integral numeric type
-- Random number generation
 - `void` type
 - Variadic lambdas
 - Square bracket lambda syntax
 - User exceptions
+- String type
 
 # Image processing
 - Transparency
@@ -24,6 +24,10 @@
 - Code deduplication on primitive impls, particularly arithmetic and draw ops
 - Type reflection to automatically generate `canvas_runner.Message` type and implementations
 - Refactor `Evaluator.lexical_settings` to avoid code duplication and code bloat
+
+# Bugs
+- Conditional declaration
+- `range` sometimes does not include lower bound when `abs(step) > 1`
 
 # Outside the code
 - Documentation
