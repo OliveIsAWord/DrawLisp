@@ -17,6 +17,7 @@ pub const Type = enum {
     int,
     bool,
     symbol,
+    string,
     primitive,
     lambda,
     color,
@@ -28,6 +29,10 @@ pub const Value = union(Type) {
         marked: bool = false,
         car: Value,
         cdr: Value,
+    };
+    pub const String = struct {
+        marked: bool = false,
+        data: []const u8,
     };
     pub const Lambda = struct {
         marked: bool = false,
@@ -45,6 +50,7 @@ pub const Value = union(Type) {
     int: i64,
     bool: bool,
     symbol: i32,
+    string: *String,
     primitive: Evaluator.PrimitiveImpl,
     lambda: *Lambda,
     color: Color,
@@ -67,6 +73,7 @@ pub const Value = union(Type) {
         if (x == .int and y == .int) return x.int == y.int;
         if (x == .bool and y == .bool) return x.bool == y.bool;
         if (x == .symbol and y == .symbol) return x.symbol == y.symbol;
+        if (x == .string and y == .string) return x.string.data.ptr == y.string.data.ptr;
         if (x == .primitive and y == .primitive)
             return x.primitive == y.primitive;
         return false;
@@ -111,6 +118,7 @@ pub const Value = union(Type) {
                 } else return writer.writeAll("<private fn>");
                 try writer.print("<fn {s}>", .{name});
             },
+            .string => |string| try writer.print("\"{s}\"", .{string.data}),
             .lambda => |lambda| {
                 try writer.writeAll("<lambda");
                 for (lambda.args.items) |symbol| {

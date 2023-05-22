@@ -380,6 +380,73 @@ fn saturatingCast(comptime Int: type, value: anytype) Int {
         @intCast(Int, value);
 }
 
+// const Number = union(enum) {
+//     int: i64,
+//     float: f64,
+
+//     const int_op = struct {
+//         fn add(x: i64, y: i64) ?i64 {
+//             return x +% y;
+//         }
+//         fn sub(x: i64, y: i64) ?i64 {
+//             return x -% y;
+//         }
+//         fn mul(x: i64, y: i64) ?i64 {
+//             return x *% y;
+//         }
+//         fn div(x: i64, y: i64) ?i64 {
+//             return checkedWrappingDiv(x, y);
+//         }
+//         fn mod(x: i64, y: i64) ?i64 {
+//             return checkedWrappingMod(x, y);
+//         }
+//         fn neg(x: i64) i64 {
+//             return -%x;
+//         }
+//     };
+
+//     const float_op = struct {
+//         fn add(x: f64, y: f64) f64 {
+//             return x + y;
+//         }
+//         fn sub(x: f64, y: f64) f64 {
+//             return x - y;
+//         }
+//         fn mul(x: f64, y: f64) f64 {
+//             return x * y;
+//         }
+//         fn div(x: f64, y: f64) f64 {
+//             @setFloatMode(.Strict);
+//             return x / y;
+//         }
+//         fn mod(x: f64, y: f64) f64 {
+//             @setFloatMode(.Strict);
+//             return x % y;
+//         }
+//         fn neg(x: f64) f64 {
+//             return -x;
+//         }
+//     };
+// };
+
+// const PrimitiveImpl = fn (*Self, ?Value.Cons) anyerror!EvalOutput;
+
+// fn arithmetic_op(
+//     comptime initial_element: ?i64,
+//     comptime operation: []const u8,
+//     comptime single_element_operation: ?[]const u8
+// ) PrimitiveImpl {
+//     return struct {
+//         fn f(self: *Self, list: ?Value.Cons) anyerror!EvalOutput {
+//             const pair = list orelse {
+//                 if (initial_element) |i| return .{ .value = .{ .int = i }};
+//                 return .{ .eval_error = .not_enough_args };
+//             };
+//             const accum = Number{ .int = i };
+//         }
+//     }.f;
+// }
+
 const lexical_settings = .{
     .{ ":clear-color", "set_clear_color" },
     .{ ":fill-color", "set_fill_color" },
@@ -768,7 +835,7 @@ const primitive_impls = struct {
         // should we keep track of a set of symbols not to bind?
         while (self.visit_stack.popOrNull()) |visit| {
             switch (visit) {
-                .nil, .int, .bool, .primitive, .color => {},
+                .nil, .int, .bool, .string, .primitive, .color => {},
                 .symbol => |symbol| if (self.getVar(symbol)) |current_value| {
                     try binds.append(.{ .symbol = symbol, .value = current_value });
                 },
@@ -1489,7 +1556,14 @@ pub fn flushDrawErrorQueue(self: *Self) void {
 pub fn eval(self: *Self, value: Value) anyerror!EvalOutput {
     self.flushDrawErrorQueue();
     switch (value) {
-        .nil, .bool, .int, .primitive, .lambda, .color => return .{ .value = value },
+        .nil,
+        .bool,
+        .int,
+        .string,
+        .primitive,
+        .lambda,
+        .color,
+        => return .{ .value = value },
         .symbol => |s| if (self.getVar(s)) |v| return .{ .value = v } else {
             return .{ .eval_error = .{ .variable_not_found = s } };
         },

@@ -4,6 +4,7 @@ const AllocError = Allocator.Error;
 
 const Value = @import("value.zig").Value;
 const Cons = Value.Cons;
+const String = Value.String;
 const Lambda = Value.Lambda;
 
 const Self = @This();
@@ -15,10 +16,12 @@ to_mark: std.ArrayListUnmanaged(AllocValue) = .{},
 
 const AllocValue = union(enum) {
     cons: *Cons,
+    string: *String,
     lambda: *Lambda,
     fn from(value: Value) ?@This() {
         return switch (value) {
             .cons => |c| .{ .cons = c },
+            .string => |s| .{ .string = s },
             .lambda => |f| .{ .lambda = f },
             else => null,
         };
@@ -26,6 +29,7 @@ const AllocValue = union(enum) {
     fn markedMut(self: @This()) *bool {
         return switch (self) {
             .cons => |c| &c.marked,
+            .string => |s| &s.marked,
             .lambda => |f| &f.marked,
         };
     }
@@ -38,6 +42,9 @@ const AllocValue = union(enum) {
     fn deinit(self: @This(), alloc: Allocator) void {
         return switch (self) {
             .cons => |c| alloc.destroy(c),
+            // Here's the ICE! A simple type error causes a panic in the compiler.
+            // .string => |s| alloc.free(s.data),
+            .string => |s| alloc.free(s),
             .lambda => |f| {
                 f.deinit(alloc);
                 alloc.destroy(f);
@@ -60,6 +67,16 @@ pub fn create_cons(self: *Self, value: Cons) AllocError!*Cons {
     return ptr;
 }
 
+pub fn create_string(self: *Self, data: []const u8) AllocError!*String {
+    var ptr = try self.value_alloc.alloc(u8, data.len);
+    {
+        errdefer self.value_alloc.free(ptr);
+        try self.all_allocations.append(self.gc_alloc, .{ .string = ptr });
+    }
+    for (ptr) |*v, i| v.* = data[i]; 
+    return .{ .data = ptr };
+}
+
 pub fn create_lambda(self: *Self, value: Lambda) AllocError!*Lambda {
     var ptr = try self.value_alloc.create(Lambda);
     {
@@ -79,6 +96,7 @@ pub fn mark(self: *Self, value: Value) AllocError!void {
             try self.mark_push(cons.car);
             try self.mark_push(cons.cdr);
         },
+        .string => |string| string.marked = true,
         .lambda => |lambda| {
             if (lambda.marked) continue;
             lambda.marked = true;
