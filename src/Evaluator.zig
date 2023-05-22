@@ -1041,6 +1041,28 @@ const primitive_impls = struct {
         return .{ .value = .nil };
     }
 
+    fn @"resize-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const dimensions: [2]c_int = if (list == null) .{ 500, 500 } else switch (try getCintArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const width = dimensions[0];
+        const height = dimensions[1];
+        self.draw_queue.push(.{ .resize_window = .{ .width = width, .height = height } });
+        return .{ .value = .nil };
+    }
+
+    fn @"reposition-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
+        const dimensions: [2]c_int = switch (try getCintArgs(2, self, list)) {
+            .args => |a| a,
+            .eval_error => |e| return .{ .eval_error = e },
+        };
+        const x = dimensions[0];
+        const y = dimensions[1];
+        self.draw_queue.push(.{ .reposition_window = .{ .x = x, .y = y } });
+        return .{ .value = .nil };
+    }
+
     fn draw(self: *Self, list: ?Value.Cons) !EvalOutput {
         if (list) |args_cons| return .{ .eval_error = .{ .extra_args = args_cons } };
         self.draw_queue.push(.draw);

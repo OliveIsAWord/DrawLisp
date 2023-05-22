@@ -45,6 +45,21 @@ pub fn createWindow(self: *Self, width: c_int, height: c_int) Result(void) {
     return self.clear();
 }
 
+pub fn resizeWindow(self: *Self, width: c_int, height: c_int) Result(void) {
+    if (self.window) |window| {
+        c.SDL_SetWindowSize(window.window_handle, width, height);
+        //return self.clear();
+    }
+    return .{ .ok = {} };
+}
+
+pub fn repositionWindow(self: *Self, x: c_int, y: c_int) Result(void) {
+    if (self.window) |window| {
+        c.SDL_SetWindowPosition(window.window_handle, x, y);
+    }
+    return .{ .ok = {} };
+}
+
 pub fn hasWindow(self: Self) bool {
     return self.window != null;
 }
@@ -135,6 +150,8 @@ fn getNewWindow(self: *Self, width: c_int, height: c_int) Result(Window) {
     ) orelse return .{ .err = getError() };
     var is_error = true;
     defer if (is_error) c.SDL_DestroyWindow(window_handle);
+    // IDK if this can error, which is why I'm not providing this as a flag in SDL_CreateWindow
+    c.SDL_SetWindowResizable(window_handle, 1);
     var renderer = c.SDL_CreateRenderer(
         window_handle,
         -1,

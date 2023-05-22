@@ -12,12 +12,9 @@
 - String type
 
 # Image processing
-- Transparency
 - Change stroke width?
 - Translation, rotation, scaling?
 - Save and load images
-- Resize window
-- Change window position
 
 # Code maintenance and refactoring
 - Handle draw errors more cleanly, rather than using `std.debug.print`

@@ -10,6 +10,8 @@ const Color = @import("Color.zig");
 
 pub const Message = union(enum) {
     create_window: struct { width: c_int, height: c_int },
+    resize_window: struct { width: c_int, height: c_int },
+    reposition_window: struct { x: c_int, y: c_int },
     set_clear_color: Color,
     set_fill_color: Color,
     set_stroke_color: Color,
@@ -53,6 +55,16 @@ pub fn run(event_queue: *Queue(Message), error_queue: *Queue([]const u8)) void {
                     const width = dimensions.width;
                     const height = dimensions.height;
                     pass_error(error_queue, canvas.createWindow(width, height));
+                },
+                .resize_window => |dimensions| {
+                    const width = dimensions.width;
+                    const height = dimensions.height;
+                    pass_error(error_queue, canvas.resizeWindow(width, height));
+                },
+                .reposition_window => |coordinates| {
+                    const x = coordinates.x;
+                    const y = coordinates.y;
+                    pass_error(error_queue, canvas.repositionWindow(x, y));
                 },
                 .set_clear_color => |color| canvas.clear_color = color,
                 .set_fill_color => |color| canvas.fill_color = color,
