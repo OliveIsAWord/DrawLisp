@@ -42,9 +42,10 @@ const AllocValue = union(enum) {
     fn deinit(self: @This(), alloc: Allocator) void {
         return switch (self) {
             .cons => |c| alloc.destroy(c),
-            // Here's the ICE! A simple type error causes a panic in the compiler.
-            // .string => |s| alloc.free(s.data),
-            .string => |s| alloc.free(s),
+            .string => |s| {
+                alloc.free(s.data);
+                alloc.destroy(s);
+            },
             .lambda => |f| {
                 f.deinit(alloc);
                 alloc.destroy(f);
@@ -68,13 +69,13 @@ pub fn create_cons(self: *Self, value: Cons) AllocError!*Cons {
 }
 
 pub fn create_string(self: *Self, data: []const u8) AllocError!*String {
-    var ptr = try self.value_alloc.alloc(u8, data.len);
-    {
-        errdefer self.value_alloc.free(ptr);
-        try self.all_allocations.append(self.gc_alloc, .{ .string = ptr });
-    }
-    for (ptr) |*v, i| v.* = data[i]; 
-    return .{ .data = ptr };
+    var data_ptr = try self.value_alloc.alloc(u8, data.len);
+    errdefer self.value_alloc.free(data_ptr);
+    var ptr = try self.value_alloc.create(String);
+    for (data_ptr) |*v, i| v.* = data[i];
+    ptr.* = .{ .data = data_ptr };
+    try self.all_allocations.append(self.gc_alloc, .{ .string = ptr });
+    return ptr;
 }
 
 pub fn create_lambda(self: *Self, value: Lambda) AllocError!*Lambda {

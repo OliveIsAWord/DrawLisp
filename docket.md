@@ -8,8 +8,8 @@
 - `void` type
 - Variadic lambdas
 - Square bracket lambda syntax
+- Slashdash comment syntax
 - User exceptions
-- String type
 
 # Image processing
 - Change stroke width?
@@ -25,6 +25,7 @@
 # Bugs
 - Conditional declaration
 - `range` sometimes does not include lower bound when `abs(step) > 1`
+- Symbols starting with `_` interpreted as integer literal
 
 # Outside the code
 - Documentation

@@ -524,6 +524,7 @@ const primitive_impls = struct {
     const @"int?" = is_type(.{.int});
     const @"bool?" = is_type(.{.bool});
     const @"symbol?" = is_type(.{.symbol});
+    const @"string?" = is_type(.{.string});
     const @"primitive?" = is_type(.{.primitive});
     const @"lambda?" = is_type(.{.lambda});
     const @"function?" = is_type(.{ .primitive, .lambda });

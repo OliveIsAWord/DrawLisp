@@ -118,7 +118,25 @@ pub const Value = union(Type) {
                 } else return writer.writeAll("<private fn>");
                 try writer.print("<fn {s}>", .{name});
             },
-            .string => |string| try writer.print("\"{s}\"", .{string.data}),
+            .string => |string| {
+                try writer.writeByte('"');
+                for (string.data) |c| {
+                    const escaped: ?[]const u8 = switch (c) {
+                        0 => "\\0",
+                        '\n' => "\\n",
+                        '\r' => "\\r",
+                        '\t' => "\\t",
+                        '"' => "\\\"",
+                        '\\' => "\\\\",
+                        else => null,
+                    };
+                    try if (escaped) |str|
+                        writer.writeAll(str)
+                    else
+                        writer.writeByte(c);
+                }
+                try writer.writeByte('"');
+            },
             .lambda => |lambda| {
                 try writer.writeAll("<lambda");
                 for (lambda.args.items) |symbol| {

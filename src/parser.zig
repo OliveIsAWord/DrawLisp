@@ -54,9 +54,11 @@ pub fn parse(
     const Item = struct { value: Value, dotty: bool, quoty: usize };
     const quote_symbol = try symbols.getOrPut("quote");
     var sexpr_stack = std.ArrayList(Item).init(parser_alloc);
+    var string_buffer = std.ArrayList(u8).init(parser_alloc);
     var quoty: usize = 0;
     var is_error = true;
     defer sexpr_stack.deinit();
+    defer string_buffer.deinit();
 
     while (true) {
         //defer std.debug.print("\n", .{});
@@ -128,6 +130,34 @@ pub fn parse(
                     } },
                 };
                 break :blk .{ .int = int };
+            },
+            .string_literal => blk: {
+                string_buffer.clearRetainingCapacity();
+                const str = token.span[1 .. token.span.len - 1];
+                var i: usize = @as(usize, 0);
+                while (i < str.len) : (i += 1) {
+                    const c: u8 = if (str[i] == '\\') blk2: {
+                        i += 1;
+                        break :blk2 switch (str[i]) {
+                            '0' => 0,
+                            'n' => '\n',
+                            'r' => '\r',
+                            't' => '\t',
+                            '"' => '"',
+                            '\\' => '\\',
+                            'x' => blk3: {
+                                const hex = std.fmt.parseInt(u8, str[i + 1 .. i + 3], 16) catch
+                                    unreachable;
+                                i += 2;
+                                break :blk3 hex;
+                            },
+                            else => unreachable,
+                        };
+                    } else str[i];
+                    try string_buffer.append(c);
+                }
+                const string_ptr = try value_alloc.create_string(string_buffer.items[0..]);
+                break :blk .{ .string = string_ptr };
             },
             .color_literal => blk: {
                 std.debug.assert(token.span[0] == '#');

@@ -11,6 +11,7 @@ pub const Token = enum {
     quote,
     dot,
     integer_literal,
+    string_literal,
     color_literal,
     identifier,
     eof,
@@ -81,6 +82,8 @@ pub const LexError = union(enum) {
     generic,
     unexpected_eof,
     invalid_integer_literal,
+    unclosed_string_literal,
+    invalid_string_escape,
     invalid_color_literal,
 
     pub fn print(self: Self, writer: anytype) !void {
@@ -88,6 +91,8 @@ pub const LexError = union(enum) {
             .generic => "unknown",
             .unexpected_eof => "unexpected eof",
             .invalid_integer_literal => "invalid integer literal",
+            .unclosed_string_literal => "unclosed string literal",
+            .invalid_string_escape => "invalid string escape",
             .invalid_color_literal => "invalid color literal",
         };
         try writer.writeAll(str);
@@ -112,6 +117,56 @@ const lexers = struct {
     const lex_paren_close = lex_exact(.paren_close, ")");
     const lex_quote = lex_exact(.quote, "'");
     const lex_dot = lex_exact(.dot, ".");
+    fn lex_string_literal(src: []const u8) ?LexOutput {
+        if (src[0] != '"') return null;
+        var i: usize = 1;
+        while (i < src.len) : (i += 1) {
+            const c = src[i];
+            if (c == '\n' or c == '\r') break;
+            if (c == '"') return .{
+                .value = .{ .token = .string_literal },
+                .span = src[0 .. i + 1],
+                .rest = src[i + 1 ..],
+            };
+            if (c == '\\') {
+                i += 1;
+                if (i >= src.len) break;
+                const invalid_string_escape_error = .{
+                    .value = .{ .lex_error = .invalid_string_escape },
+                    .span = src[0 .. i + 1],
+                    .rest = src[i + 1 ..],
+                };
+                switch (src[i]) {
+                    '0', 'n', 'r', 't', '"', '\\' => {},
+                    'x' => if (i + 2 >= src.len or !is_hex(src[i + 1]) or !is_hex(src[i + 2]))
+                        return invalid_string_escape_error,
+                    else => return invalid_string_escape_error,
+                }
+            }
+        }
+        return .{
+            .value = .{ .lex_error = .unclosed_string_literal },
+            .span = src[0..i],
+            .rest = src[i..],
+        };
+    }
+    fn lex_color_literal(src: []const u8) ?LexOutput {
+        if (src[0] != '#') return null;
+        const rest = src[1..];
+        var i: usize = 0;
+        var is_error = false;
+        while (i < rest.len) : (i += 1) {
+            const c = rest[i];
+            if (is_delimiter(c)) break;
+            if (!is_hex(c)) is_error = true;
+        }
+        const value: LexOutput.Value = if (i == 6 or i == 8) .{ .token = .color_literal } else .{ .lex_error = .invalid_color_literal };
+        return .{
+            .value = value,
+            .span = src[0 .. i + 1],
+            .rest = src[i + 1 ..],
+        };
+    }
     fn lex_integer_literal(src: []const u8) ?LexOutput {
         const minus_offset = @boolToInt(src[0] == '-');
         var i: usize = minus_offset;
@@ -138,23 +193,6 @@ const lexers = struct {
             .value = .{ .token = .integer_literal },
             .span = src[0..i],
             .rest = src[i..],
-        };
-    }
-    fn lex_color_literal(src: []const u8) ?LexOutput {
-        if (src[0] != '#') return null;
-        const rest = src[1..];
-        var i: usize = 0;
-        var is_error = false;
-        while (i < rest.len) : (i += 1) {
-            const c = rest[i];
-            if (is_delimiter(c)) break;
-            if (!is_hex(c)) is_error = true;
-        }
-        const value: LexOutput.Value = if (i == 6 or i == 8) .{ .token = .color_literal } else .{ .lex_error = .invalid_color_literal };
-        return .{
-            .value = value,
-            .span = src[0 .. i + 1],
-            .rest = src[i + 1 ..],
         };
     }
     fn lex_ident(src: []const u8) ?LexOutput {
