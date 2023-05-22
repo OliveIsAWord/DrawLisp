@@ -1037,7 +1037,7 @@ const primitive_impls = struct {
     fn @"time-ns"(self: *Self, list: ?Value.Cons) !EvalOutput {
         if (list) |args_cons| return .{ .eval_error = .{ .extra_args = args_cons } };
         const time = nanoTimestamp() - self.start_time;
-        // This will overflow after about ~292.5 years. So much for Zig's claims of "robust" software...
+        // This will overflow after ~292.5 years. So much for Zig's claims of "robust" software...
         return .{ .value = .{ .int = @truncate(i64, time) } };
     }
     const @"set!" = todo;

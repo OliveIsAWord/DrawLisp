@@ -30,8 +30,6 @@ pub const Message = union(enum) {
     kill,
 };
 
-const one_billion: u64 = 1_000_000_000;
-
 fn pass_error(queue: *Queue([]const u8), value: Result(void)) void {
     switch (value) {
         .ok => {},
