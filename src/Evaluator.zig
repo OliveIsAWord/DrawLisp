@@ -88,16 +88,14 @@ fn GetArgsOutput(comptime num_args: comptime_int) type {
     };
 }
 
+const GetVarArgsOutput = union(enum) {
+    args: []Value,
+    eval_error: EvalError,
+};
+
 fn GetCintArgsOutput(comptime num_args: comptime_int) type {
     return union(enum) {
         args: [num_args]c_int,
-        eval_error: EvalError,
-    };
-}
-
-fn GetVarArgsOutput(comptime num_args: comptime_int) type {
-    return union(enum) {
-        args: struct { buffer: [num_args]Value, len: usize },
         eval_error: EvalError,
     };
 }
@@ -156,13 +154,13 @@ fn getArgs(
 fn getVarArgsNoEval(
     comptime min_args: comptime_int,
     comptime max_args: comptime_int,
+    buffer: *[max_args]Value,
     list_: ?Value.Cons,
-) GetVarArgsOutput(max_args) {
+) GetVarArgsOutput {
     comptime std.debug.assert(min_args <= max_args);
     var list = list_;
-    var args: [max_args]Value = undefined;
     var len: usize = 0;
-    for (args) |*arg| {
+    for (buffer) |*arg| {
         const cons = list orelse break;
         arg.* = cons.car;
         list = switch (cons.cdr.toListPartial()) {
@@ -172,20 +170,21 @@ fn getVarArgsNoEval(
         len += 1;
     }
     if (len < min_args) return .{ .eval_error = .not_enough_args };
-    return .{ .args = .{ .buffer = args, .len = len } };
+    return .{ .args = buffer[0..len] };
 }
 
 fn getVarArgs(
     comptime min_args: comptime_int,
     comptime max_args: comptime_int,
     self: *Self,
+    buffer: *[max_args]Value,
     list: ?Value.Cons,
-) !GetVarArgsOutput(max_args) {
-    var out = switch (getVarArgsNoEval(min_args, max_args, list)) {
+) !GetVarArgsOutput {
+    var out = switch (getVarArgsNoEval(min_args, max_args, buffer, list)) {
         .args => |a| a,
         .eval_error => |e| return .{ .eval_error = e },
     };
-    for (out.buffer[0..out.len]) |*arg| {
+    for (out) |*arg| {
         switch (try self.eval(arg.*)) {
             .value => |v| arg.* = v,
             .eval_error => |e| return .{ .eval_error = e },
@@ -269,18 +268,21 @@ const GetRangeParametersOut = union(enum) {
 fn getRangeParameters(self: *Self, list: ?Value.Cons) !GetRangeParametersOut {
     var buffer: [3]i64 = undefined;
     var len: usize = undefined;
-    switch (try getVarArgs(1, 3, self, list)) {
-        .args => |out| {
-            len = out.len;
-            for (out.buffer[0..len]) |v, i| switch (v) {
-                .int => |n| buffer[i] = n,
-                else => return .{ .eval_error = .{ .expected_type = .{
-                    .expected = TypeMask.new(&.{.int}),
-                    .found = v,
-                } } },
-            };
-        },
-        .eval_error => |e| return .{ .eval_error = e },
+    {
+        var value_buffer: [3]Value = undefined;
+        switch (try getVarArgs(1, 3, self, &value_buffer, list)) {
+            .args => |out| {
+                len = out.len;
+                for (out) |v, i| switch (v) {
+                    .int => |n| buffer[i] = n,
+                    else => return .{ .eval_error = .{ .expected_type = .{
+                        .expected = TypeMask.new(&.{.int}),
+                        .found = v,
+                    } } },
+                };
+            },
+            .eval_error => |e| return .{ .eval_error = e },
+        }
     }
     const range: RangeParameters = switch (len) {
         1 => if (buffer[0] < 0) .{
@@ -298,6 +300,41 @@ fn getRangeParameters(self: *Self, list: ?Value.Cons) !GetRangeParametersOut {
             .step = math.sign(buffer[1] -| buffer[0]),
         },
         3 => .{ .start = buffer[0], .end = buffer[1], .step = buffer[2] },
+        else => unreachable,
+    };
+    return .{ .parameters = range };
+}
+
+const GetWindowSizeParametersOut = union(enum) {
+    parameters: canvas_runner.WindowSize,
+    eval_error: EvalError,
+};
+fn getWindowSizeParameters(self: *Self, list: ?Value.Cons) !GetWindowSizeParametersOut {
+    var buffer: [3]c_int = undefined;
+    var len: usize = undefined;
+    {
+        var value_buffer: [3]Value = undefined;
+        switch (try getVarArgs(0, 3, self, &value_buffer, list)) {
+            .args => |out| {
+                len = out.len;
+                for (out) |v, i| switch (v) {
+                    .int => |n| buffer[i] = cast_cint(n) orelse return .{
+                        .eval_error = .{ .out_of_cint_range = n },
+                    },
+                    else => return .{ .eval_error = .{ .expected_type = .{
+                        .expected = TypeMask.new(&.{.int}),
+                        .found = v,
+                    } } },
+                };
+            },
+            .eval_error => |e| return .{ .eval_error = e },
+        }
+    }
+    const range: canvas_runner.WindowSize = switch (len) {
+        0 => .{},
+        1 => return .{ .eval_error = .not_enough_args },
+        2 => .{ .width = buffer[0], .height = buffer[1] },
+        3 => .{ .width = buffer[0], .height = buffer[1], .scale = buffer[2] },
         else => unreachable,
     };
     return .{ .parameters = range };
@@ -1006,13 +1043,14 @@ const primitive_impls = struct {
     const @"set!" = todo;
 
     fn color(self: *Self, list: ?Value.Cons) !EvalOutput {
-        const args = switch (try getVarArgs(1, 4, self, list)) {
+        var value_buffer: [4]Value = undefined;
+        const args = switch (try getVarArgs(1, 4, self, &value_buffer, list)) {
             .args => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
         };
         if (args.len == 2) return .{ .eval_error = .not_enough_args };
         var ints: [4]u8 = undefined;
-        for (args.buffer[0..args.len]) |a, i| {
+        for (args) |a, i| {
             switch (a) {
                 .int => |v| ints[i] = saturatingCast(u8, v),
                 else => return .{ .eval_error = .{ .expected_type = .{
@@ -1031,24 +1069,20 @@ const primitive_impls = struct {
     }
 
     fn @"create-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
-        const dimensions: [2]c_int = if (list == null) .{ 500, 500 } else switch (try getCintArgs(2, self, list)) {
-            .args => |a| a,
+        const dimensions = switch (try getWindowSizeParameters(self, list)) {
+            .parameters => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
         };
-        const width = dimensions[0];
-        const height = dimensions[1];
-        self.draw_queue.push(.{ .create_window = .{ .width = width, .height = height } });
+        self.draw_queue.push(.{ .create_window = dimensions });
         return .{ .value = .nil };
     }
 
     fn @"resize-window"(self: *Self, list: ?Value.Cons) !EvalOutput {
-        const dimensions: [2]c_int = if (list == null) .{ 500, 500 } else switch (try getCintArgs(2, self, list)) {
-            .args => |a| a,
+        const dimensions = switch (try getWindowSizeParameters(self, list)) {
+            .parameters => |a| a,
             .eval_error => |e| return .{ .eval_error = e },
         };
-        const width = dimensions[0];
-        const height = dimensions[1];
-        self.draw_queue.push(.{ .resize_window = .{ .width = width, .height = height } });
+        self.draw_queue.push(.{ .resize_window = dimensions });
         return .{ .value = .nil };
     }
 

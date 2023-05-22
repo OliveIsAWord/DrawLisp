@@ -36,19 +36,21 @@ stroke_color: Color = Color.magenta,
 
 const Self = @This();
 
-pub fn createWindow(self: *Self, width: c_int, height: c_int) Result(void) {
+pub fn createWindow(self: *Self, width: c_int, height: c_int, scale: ?c_int) Result(void) {
     if (c.SDL_InitSubSystem(c.SDL_INIT_VIDEO) != 0) return .{ .err = getError() };
-    switch (self.getNewWindow(width, height)) {
+    switch (self.getNewWindow(width, height, scale)) {
         .ok => {},
         .err => |e| return .{ .err = e },
     }
     return self.clear();
 }
 
-pub fn resizeWindow(self: *Self, width: c_int, height: c_int) Result(void) {
+pub fn resizeWindow(self: *Self, width: c_int, height: c_int, scale: ?c_int) Result(void) {
     if (self.window) |window| {
-        c.SDL_SetWindowSize(window.window_handle, width, height);
-        //return self.clear();
+        const times_scale = scale orelse getWindowScale(window);
+        c.SDL_SetWindowSize(window.window_handle, width * times_scale, height * times_scale);
+        if (self.setWindowScale(scale) == .err) return .{ .err = getError() };
+        return self.clear();
     }
     return .{ .ok = {} };
 }
@@ -134,18 +136,19 @@ fn getError() []const u8 {
     return std.mem.span(c.SDL_GetError());
 }
 
-fn getWindowOrDefault(self: *Self) Result(Window) {
-    return if (self.window) |w| .{ .ok = w } else self.getNewWindow(100, 100);
-}
+// fn getWindowOrDefault(self: *Self) Result(Window) {
+//     return if (self.window) |w| .{ .ok = w } else self.getNewWindow(100, 100);
+// }
 
-fn getNewWindow(self: *Self, width: c_int, height: c_int) Result(Window) {
+fn getNewWindow(self: *Self, width: c_int, height: c_int, scale: ?c_int) Result(Window) {
+    const times_scale = scale orelse 1;
     if (self.hasWindow()) self.destroyWindow();
     var window_handle = c.SDL_CreateWindow(
         "DrawLisp Canvas",
         c.SDL_WINDOWPOS_UNDEFINED,
         c.SDL_WINDOWPOS_UNDEFINED,
-        width,
-        height,
+        width * times_scale,
+        height * times_scale,
         0,
     ) orelse return .{ .err = getError() };
     var is_error = true;
@@ -162,6 +165,7 @@ fn getNewWindow(self: *Self, width: c_int, height: c_int) Result(Window) {
         return .{ .err = getError() };
     const window = .{ .window_handle = window_handle, .renderer = renderer };
     self.window = window;
+    if (self.setWindowScale(scale) == .err) return .{ .err = getError() };
     is_error = false;
     return .{ .ok = window };
 }
@@ -171,4 +175,20 @@ fn setColor(self: Self, color: Color) Result(void) {
         if (c.SDL_SetRenderDrawColor(window.renderer, color.r, color.g, color.b, color.a) != 0)
             return .{ .err = getError() };
     return .{ .ok = {} };
+}
+
+fn setWindowScale(self: *Self, scale_: ?c_int) Result(void) {
+    const scale = @intToFloat(f32, scale_ orelse return .{ .ok = {} });
+    if (self.window) |window|
+        if (c.SDL_RenderSetScale(window.renderer, scale, scale) != 0)
+            return .{ .err = getError() };
+    return .{ .ok = {} };
+}
+
+fn getWindowScale(window: Window) c_int {
+    var x_scale: f32 = undefined;
+    var y_scale: f32 = undefined;
+    c.SDL_RenderGetScale(window.renderer, &x_scale, &y_scale);
+    std.debug.assert(x_scale == y_scale);
+    return @floatToInt(c_int, x_scale);
 }
