@@ -1,3 +1,5 @@
+⚠️ These docs are missing a lot! Please refer to the commits or the source code for more information about the DrawLisp language.
+
 # Introduction
 
 DrawLisp is a dialect of the [Lisp](https://en.wikipedia.org/wiki/Lisp_(programming_language)) family of programming languages. Here is an example program.

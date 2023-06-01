@@ -33,7 +33,7 @@ pub fn main() !void {
     defer stderr_bw.flush() catch {};
     const stderr = RuntimeWriter.fromBufferedWriter(&stderr_bw);
 
-    try stdout.writeAll("DrawLisp v0.0.1a\n");
+    try stdout.writeAll("DrawLisp v1.0 by OliveIsAWord\n");
     try stdout_bw.flush();
 
     var symbol_table = SymbolTable.init(alloc, alloc);
